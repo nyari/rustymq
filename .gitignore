@@ -1,0 +1,17 @@
+# Cargo compiled files
+target
+
+# Cargo ingnored files
+Cargo.lock
+
+# Visual Studio Code files
+.vscode
+
+# Rust toolchain
+*.fmt
+
+# Cargo
+/output/*
+
+# Profiling
+*perf.data*% 
