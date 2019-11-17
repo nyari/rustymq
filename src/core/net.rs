@@ -143,34 +143,44 @@ impl IPv4Address
         }
     }
 
-    pub fn new_address_from_slice(address:&[u8; 4]) -> Self {
+    pub fn new_address_from_array(address:[u8; 4]) -> Self {
         Self {
-            value:address.clone(),
+            value:address,
             subnet:None
         }
     }
 
+    pub fn new_address_from_slice(address:&[u8]) -> Result<Self, AddressParsingError> {
+        if address.len() == 4 {
+            Ok(Self::new_address_from_array([address[0], address[1], address[2], address[3]]))
+        } else {
+            Err(AddressParsingError::AddressGroupOutOfBounds)
+        }
+    } 
+
     pub fn new_subnet(n1:u8, n2:u8, n3:u8, n4:u8, subnet: IPv4Subnet) -> Self {
-        let result_value:[u8;4] = [n1, n2, n3, n4];
+        let address = Self::new_address(n1, n2, n3, n4);
         Self {
-            value:result_value,
-            subnet:Some(subnet)
+            subnet:Some(subnet),
+            ..address
         }
     }
 
-    pub fn new_subnet_from_slice(address:&[u8; 4], subnet: IPv4Subnet) -> Self {
+    pub fn new_subnet_from_array(address:[u8; 4], subnet: IPv4Subnet) -> Self {
+        let address = Self::new_address_from_array(address);
         Self {
-            value:address.clone(),
-            subnet:Some(subnet)
+            subnet:Some(subnet),
+            ..address
         }
     }
 
-    fn str_to_address_group(value:&str) -> Result<u8, AddressParsingError> {
-        match value.parse::<u8>() {
-            Ok(result) => Ok(result),
-            Err(_) => Err(AddressParsingError::AddressGroupOutOfBounds)
+    pub fn new_subnet_from_slice(address:&[u8], subnet: IPv4Subnet) -> Result<Self, AddressParsingError> {
+        if address.len() == 4 {
+            Ok(Self::new_subnet_from_array([address[0], address[1], address[2], address[3]], subnet))
+        } else {
+            Err(AddressParsingError::AddressGroupOutOfBounds)
         }
-    }
+    } 
 
 }
 
@@ -183,18 +193,20 @@ impl FromStr for IPv4Address
         let test_regex = Regex::new(r"^([\w\d:/]{4,})?(?P<a>\d{1,3})\.(?P<b>\d{1,3})\.(?P<c>\d{1,3})\.(?P<d>\d{1,3})(/(?P<sub>[0-9\.]+))?$").unwrap();
         match test_regex.captures(s) {
             Some(captures) => {
-                let n1 = IPv4Address::str_to_address_group(captures.name("a").unwrap().as_str())?;
-                let n2 = IPv4Address::str_to_address_group(captures.name("b").unwrap().as_str())?;
-                let n3 = IPv4Address::str_to_address_group(captures.name("c").unwrap().as_str())?;
-                let n4 = IPv4Address::str_to_address_group(captures.name("d").unwrap().as_str())?;
+                let values : Vec<u8> = ["a", "b", "c", "d"].into_iter()
+                                                           .map(|x| captures.name(x).unwrap().as_str().parse::<u8>())
+                                                           .filter(|x| x.is_ok())
+                                                           .map(|x| x.unwrap())
+                                                           .collect();
+                
                 match captures.name("sub") {
                     Some(value) => {
                         match value.as_str().parse::<IPv4Subnet>() {
-                            Ok(subnet) => Ok(Self::new_subnet(n1, n2, n3, n4, subnet)),
+                            Ok(subnet) => Self::new_subnet_from_slice(values.as_slice(), subnet),
                             Err(err) => Err(AddressParsingError::Subnet(err))
                         }
                     },
-                    None => Ok(Self::new_address(n1, n2, n3, n4))
+                    None => Self::new_address_from_slice(values.as_slice())
                 }
             },
             None => Err(AddressParsingError::IncorrectStringFormat)
@@ -232,8 +244,8 @@ mod tests
     }
 
         #[test]
-    fn ipv4address_new_address_from_slice() {
-        let new_address = IPv4Address::new_address_from_slice(&[192,168,0,1]);
+    fn ipv4address_new_address_from_array() {
+        let new_address = IPv4Address::new_address_from_array([192,168,0,1]);
         assert_eq!(new_address.value, [192,168,0,1]);
         assert!(new_address.subnet.is_none());
     }
@@ -246,8 +258,8 @@ mod tests
     }
 
     #[test]
-    fn ipv4address_new_subnet_from_slice() {
-        let new_address = IPv4Address::new_subnet_from_slice(&[192,168,0,1], IPv4Subnet::new_bits(24).unwrap());
+    fn ipv4address_new_subnet_from_array() {
+        let new_address = IPv4Address::new_subnet_from_array([192,168,0,1], IPv4Subnet::new_bits(24).unwrap());
         assert_eq!(new_address.value, [192,168,0,1]);
         assert_eq!(new_address.subnet.unwrap().bits, 24);
     }
