@@ -106,7 +106,7 @@ impl RawMessageBufferStreamReader {
         }
     }
 
-    pub fn read_into<'a, T, F: Fn(BufferMutSlice<'a>) -> Result<usize, T>>(&'a mut self, reader: F) -> Result<(), T>{
+    pub fn read_into<F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState>{
         self.ensure_batch_size_capacity_at_end_of_buffer();
         self.read_into_buffer(reader)?;
         Ok(())
@@ -119,8 +119,8 @@ impl RawMessageBufferStreamReader {
         }
     }
 
-    fn read_into_buffer<'a, T, F: Fn(BufferMutSlice<'a>) -> Result<usize, T>>(&'a mut self, reader: F) -> Result<(), T> {
-        let read_amount = reader(&mut self.buffer.as_mut_slice()[self.len..self.batch_size])?;
+    fn read_into_buffer<'a, F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState> {
+        let read_amount = reader.read(&mut self.buffer.as_mut_slice()[self.len..self.batch_size])?;
         self.len += read_amount;
         Ok(())
     }
@@ -182,10 +182,10 @@ impl RawMessageBufferStreamWriter {
         }
     }
 
-    pub fn write_into<F: Fn(&[u8]) -> Result<usize, TCPConnectionStreamState>>(&mut self, writer: F)-> Result<(), TCPConnectionStreamState> {
+    pub fn write_into<F: Write>(&mut self, writer:&mut F)-> Result<(), TCPConnectionStreamState> {
         let result = {match self.get_batch() {
             Some(buffer_slice) => {
-                Ok(writer(buffer_slice)?)
+                Ok(writer.write(buffer_slice)?)
             },
             None => {
                 Err(TCPConnectionStreamState::Empty)
@@ -252,7 +252,7 @@ impl TCPConnectionStream {
     }
 
     pub fn proceed_sending(&mut self) -> Result<(), TCPConnectionStreamState> {
-        match self.writer.write_into(|x| self.stream.write(x).map_err(|err| TCPConnectionStreamState::from(err))) {
+        match self.writer.write_into(&mut self.stream) {
             Err(TCPConnectionStreamState::Finished) => {
                 if let Some(metadata) = self.writer.get_metadata() {
                     let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
@@ -265,7 +265,7 @@ impl TCPConnectionStream {
     }
 
     pub fn proceed_receiving(&mut self) -> Result<(), TCPConnectionStreamState> {
-        self.reader.read_into(|x| self.stream.read(x))?;
+        self.reader.read_into(&mut self.stream)?;
         match self.reader.try_parse_raw_message() {
             Ok(message) => {
                 let mut inward_queue = self.inward_queue.lock().unwrap();

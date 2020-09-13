@@ -1,5 +1,3 @@
-use std::ops;
-
 pub type Buffer = Vec<u8>;
 pub type BufferSlice<'a> = &'a[u8];
 pub type BufferMutSlice<'a> = &'a mut[u8];
