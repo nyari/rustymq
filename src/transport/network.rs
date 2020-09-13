@@ -182,20 +182,20 @@ impl RawMessageBufferStreamWriter {
         }
     }
 
-    pub fn write_into<'a, F: Fn(BufferSlice<'a>) -> Result<usize, TCPConnectionStreamState>>(&'a mut self, writer: F) -> Result<(), TCPConnectionStreamState> {
-        let result = match self.get_batch() {
+    pub fn write_into<F: Fn(&[u8]) -> Result<usize, TCPConnectionStreamState>>(&mut self, writer: F)-> Result<(), TCPConnectionStreamState> {
+        let result = {match self.get_batch() {
             Some(buffer_slice) => {
                 Ok(writer(buffer_slice)?)
             },
             None => {
                 Err(TCPConnectionStreamState::Empty)
             }
-        };
+        }};
 
         if let Ok(amount) = result {
             self.progress_amount(amount);
         }
-        if self.is_empty() {Err(TCPConnectionStreamState::Finished)} else { Ok(()) }
+        if self.is_empty() {Err(TCPConnectionStreamState::Finished)} else { result.map(|_| {()}) }
     }
 }
 
