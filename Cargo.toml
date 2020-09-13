@@ -5,3 +5,10 @@ authors = ["David Tamas Nyari <nyaridavid@gmail.com>"]
 
 [dependencies]
 regex = "1.*"
+rand = "0.7.*"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
