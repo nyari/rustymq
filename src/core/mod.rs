@@ -14,3 +14,5 @@ pub use self::message::MessageId;
 pub use self::message::ConversationId;
 pub use self::message::PeerId;
 pub use self::message::Part;
+
+pub use self::transport::TransportMethod;

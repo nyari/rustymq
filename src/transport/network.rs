@@ -57,6 +57,7 @@ impl From<io::Error> for ConnectorError {
     }
 }
 
+#[derive(Debug)]
 enum TCPConnectionStreamState {
     Finished,
     Empty,
@@ -369,6 +370,7 @@ impl TCPConnectionStreamHandle {
     }
 }
 
+#[derive(Debug)]
 #[derive(PartialEq)]
 enum TCPConnectionWorkerState {
     Busy,

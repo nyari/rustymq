@@ -42,16 +42,19 @@ pub enum ConnectorError {
     InternalError
 }
 
+#[derive(Debug)]
 pub enum SendTypedError<T:TryIntoFromBuffer> {
     Socket(SocketError),
     Conversion(<RawMessage as TryFrom<TypedMessage<T>>>::Error)
 }
 
+#[derive(Debug)]
 pub enum ReceiveTypedError<T:TryIntoFromBuffer> {
     Socket(SocketError),
     Conversion(<TypedMessage<T> as TryFrom<RawMessage>>::Error)
 }
 
+#[derive(Debug)]
 pub enum QueryTypedError<T:TryIntoFromBuffer> {
     Send(SendTypedError<T>),
     Receive(ReceiveTypedError<T>)
@@ -108,7 +111,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         }
     }
 
-    fn respond(&mut self, flags:OpFlag, processor:&dyn Fn(RawMessage) -> RawMessage) -> Result<(), SocketError> {
+    fn respond<T: Fn(RawMessage) -> RawMessage> (&mut self, flags:OpFlag, processor: T) -> Result<(), SocketError> {
         let query = self.receive(flags.clone())?;
         let query_metadata = query.metadata().clone();
         let response = processor(query).continue_exchange_metadata(query_metadata);
@@ -116,7 +119,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         Ok(())
     }
 
-    fn respond_typed<T:TryIntoFromBuffer>(&mut self, flags:OpFlag, processor:&dyn Fn(TypedMessage<T>) -> TypedMessage<T>) -> Result<(), QueryTypedError<T>> {
+    fn respond_typed<T:TryIntoFromBuffer, Q: Fn(TypedMessage<T>) -> TypedMessage<T>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<T>> {
         match self.receive_typed(flags.clone()) {
             Ok(msg) => {
                 let response = processor(msg);

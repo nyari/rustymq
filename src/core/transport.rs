@@ -2,6 +2,7 @@ use core::message::{RawMessage, PeerId};
 use core::socket::{SocketError, ConnectorError, OpFlag};
 use std::net::{SocketAddr};
 
+#[derive(Debug)]
 pub enum TransportMethod
 {
     Network(SocketAddr),

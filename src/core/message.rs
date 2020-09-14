@@ -5,7 +5,7 @@ use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
 
 use core::util::Identifier;
-use core::serializer::Buffer;
+pub use core::serializer::Buffer;
 
 #[derive(Debug)]
 #[derive(Clone)]
