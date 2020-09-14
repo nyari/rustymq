@@ -3,7 +3,7 @@ use core::util;
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag};
 use core::serializer;
-use core::serializer::{FlatSerializer, FlatDeserializer, Serializer, Serializable, Buffer, BufferSlice, BufferMutSlice};
+use core::serializer::{FlatSerializer, FlatDeserializer, Serializer, Serializable, Buffer, BufferSlice};
 
 use std::collections::{HashMap, VecDeque, HashSet};
 use std::net;
@@ -11,8 +11,7 @@ use std::net::{SocketAddr};
 use std::io;
 use std::io::{Write, Read};
 use std::thread;
-use std::thread::{Thread};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::convert::{From};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
@@ -201,7 +200,7 @@ impl RawMessageBufferStreamWriter {
 
 struct TCPConnectionStream {
     stream: net::TcpStream,
-    addr: SocketAddr,
+//    addr: SocketAddr,
     reader: RawMessageBufferStreamReader,
     writer: RawMessageBufferStreamWriter,
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
@@ -214,7 +213,7 @@ impl TCPConnectionStream {
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
         Ok(Self {
             stream: net::TcpStream::connect(addr)?,
-            addr: addr,
+//            addr: addr,
             reader: RawMessageBufferStreamReader::new(BUFFER_BATCH_SIZE),
             writer: RawMessageBufferStreamWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -435,6 +434,7 @@ impl TCPConnection {
         self.handle.receive_async()
     }
 
+    #[allow(dead_code)]
     pub fn receive(&self) -> Result<RawMessage, SocketError> {
         self.handle.receive()
     }
@@ -445,6 +445,7 @@ impl TCPConnection {
 }
 
 impl Drop for TCPConnection {
+    #[allow(unused_must_use)]
     fn drop(&mut self) {
         {
             let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
@@ -561,6 +562,14 @@ impl Transport for TCPConnectionManager {
 
 pub struct TCPInitiatorTransport {
     manager: TCPConnectionManager
+}
+
+impl TCPInitiatorTransport {
+    pub fn new() -> Self {
+        Self {
+            manager: TCPConnectionManager::new()
+        }
+    }
 }
 
 impl Transport for TCPInitiatorTransport {
