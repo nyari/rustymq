@@ -37,6 +37,26 @@ impl From<io::Error> for SocketError {
     }
 }
 
+impl From<io::Error> for ConnectorError {
+    fn from(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::AddrInUse => ConnectorError::AlreadyInUse,
+            io::ErrorKind::AddrNotAvailable => ConnectorError::CouldNotConnect,
+            io::ErrorKind::AlreadyExists => ConnectorError::AlreadyConnected,
+            io::ErrorKind::BrokenPipe => ConnectorError::InternalError,
+            io::ErrorKind::ConnectionAborted => ConnectorError::InternalError,
+            io::ErrorKind::ConnectionRefused => ConnectorError::InternalError,
+            io::ErrorKind::Interrupted => ConnectorError::InternalError,
+            io::ErrorKind::InvalidData => ConnectorError::InternalError,
+            io::ErrorKind::InvalidInput => ConnectorError::InternalError,
+            io::ErrorKind::NotConnected => ConnectorError::CouldNotConnect,
+            io::ErrorKind::TimedOut => ConnectorError::InternalError,
+            io::ErrorKind::Other => ConnectorError::InternalError,
+            _ => ConnectorError::InternalError,
+        }
+    }
+}
+
 enum TCPConnectionStreamState {
     Finished,
     Empty,
@@ -223,6 +243,19 @@ impl TCPConnectionStream {
         })
     }
 
+    pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
+        Ok(Self {
+            stream: stream,
+//            addr: addr,
+            reader: RawMessageBufferStreamReader::new(BUFFER_BATCH_SIZE),
+            writer: RawMessageBufferStreamWriter::new_empty(),
+            prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
+            prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
+            outward_queue: Arc::new(Mutex::new(VecDeque::new())),
+            inward_queue: Arc::new(Mutex::new(VecDeque::new()))
+        })
+    }
+
     pub fn get_handle(&self) -> TCPConnectionStreamHandle {
         TCPConnectionStreamHandle::new(self.outward_queue.clone(),
                                        self.prio_outward_queue.clone(),
@@ -353,12 +386,20 @@ struct TCPConnectionWorker {
 }
 
 impl TCPConnectionWorker {
-    pub fn connect(addr: SocketAddr) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
+    fn construct_from_stream(stream: TCPConnectionStream) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
         let worker = Self {
-            stream: TCPConnectionStream::connect(addr)?
+            stream: stream
         };
         let handle = worker.stream.get_handle();
         Ok((worker, handle))
+    }
+
+    pub fn connect(addr: SocketAddr) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
+        Self::construct_from_stream(TCPConnectionStream::connect(addr)?)
+    }
+
+    pub fn inward_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
+        Self::construct_from_stream(TCPConnectionStream::inward_connection((stream, addr))?)
     }
 
     fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
@@ -410,8 +451,7 @@ struct TCPConnection {
 }
 
 impl TCPConnection {
-    pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
-        let (worker, handle) = TCPConnectionWorker::connect(addr)?;
+    fn construct_from_worker_handle((worker, handle): (TCPConnectionWorker, TCPConnectionStreamHandle), addr: SocketAddr) -> Result<Self, SocketError> {
         let stop_semaphore = Arc::new(Mutex::new(false));
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
@@ -420,6 +460,14 @@ impl TCPConnection {
             worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore) } )),
             stop_semaphore: stop_semaphore_clone
         })
+    }
+
+    pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
+        Self::construct_from_worker_handle(TCPConnectionWorker::connect(addr)?, addr)
+    }
+
+    pub fn inward_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
+        Self::construct_from_worker_handle(TCPConnectionWorker::inward_connection((stream, addr))?, addr)
     }
 
     pub fn send_async(&self, message: RawMessage) {
@@ -478,6 +526,13 @@ impl TCPConnectionManager {
         }
     }
 
+    pub fn inward_connection(&mut self, (stream, addr): (net::TcpStream, SocketAddr)) -> Result<PeerId, ConnectorError> {
+        match TCPConnection::inward_connection((stream, addr)) {
+            Ok(connection) => self.commit_onnection(connection),
+            Err(_) => Err(ConnectorError::CouldNotConnect)
+        }
+    }
+
     pub fn get_message_peer_connection<'a>(&'a self, message: &RawMessage) -> Result<&'a TCPConnection, SocketError> {
         match message.peer_id() {
             Some(peerid) => match self.peers.get(peerid) {
@@ -496,16 +551,19 @@ impl TCPConnectionManager {
         message.apply_peer_id(self.addresses.get(&address).unwrap().clone())
     }
 
+    fn commit_onnection(&mut self, connection: TCPConnection) -> Result<PeerId, ConnectorError> {
+        let peerid = PeerId::new_random();
+        let addr = connection.get_address();
+
+        self.peers.insert(peerid, connection);
+        self.addresses.insert(addr, peerid);
+
+        Ok(peerid)
+    }
+
     fn connect_internal(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         match TCPConnection::connect(address) {
-            Ok(connection) => {
-                let peerid = PeerId::new_random();
-
-                self.peers.insert(peerid, connection);
-                self.addresses.insert(address, peerid);
-
-                Ok(peerid)
-            }
+            Ok(connection) => self.commit_onnection(connection),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
     }
@@ -595,6 +653,79 @@ impl InitiatorTransport for TCPInitiatorTransport {
     }
 }
 
+struct TCPConnectionListener {
+    manager: Arc<Mutex<TCPConnectionManager>>,
+    listener: net::TcpListener
+}
+
+impl TCPConnectionListener {
+    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<TCPConnectionManager>>) -> Result<Self, ConnectorError> {
+        Ok(Self {
+            manager: manager,
+            listener: net::TcpListener::bind(addr)?
+        })
+    }
+
+    pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
+        while let Ok(incoming) = self.listener.accept() {
+            {
+                let mut manager = self.manager.lock().unwrap();
+                manager.inward_connection(incoming)?;
+            }
+            {
+                if *stop_semaphore.lock().unwrap() {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub struct TCPAcceptorTransport {
-    manager: TCPConnectionManager
+    manager: Arc<Mutex<TCPConnectionManager>>,
+    listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
+    stop_semaphore: Arc<Mutex<bool>>
+}
+
+impl TCPAcceptorTransport {
+    pub fn new() -> Self {
+        let manager = Arc::new(Mutex::new(TCPConnectionManager::new()));
+        let stop_semaphore = Arc::new(Mutex::new(false));
+        Self {
+            manager: manager,
+            listener_thread: None,
+            stop_semaphore
+        }
+    }
+}
+
+impl Transport for TCPAcceptorTransport {
+    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+        let mut manager = self.manager.lock().unwrap();
+        manager.send(message, flags)
+    }
+
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+        let mut manager = self.manager.lock().unwrap();
+        manager.receive(flags)
+    }
+
+    fn close(self) -> Result<(), SocketError> {
+        Ok(())
+    }
+}
+
+impl AcceptorTransport for TCPAcceptorTransport {
+    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
+        if let TransportMethod::Network(addr) = target {
+            let listener = TCPConnectionListener::bind(addr, self.manager.clone())?;
+            let stop_semaphore = self.stop_semaphore.clone();
+            self.listener_thread = Some(thread::spawn(move || {listener.main_loop(stop_semaphore)}));
+            Ok(None)
+        } else {
+            Err(ConnectorError::InvalidTransportMethod)
+        }
+    }
 }

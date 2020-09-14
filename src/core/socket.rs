@@ -36,8 +36,10 @@ pub enum SocketError {
 pub enum ConnectorError {
     InvalidTransportMethod,
     AlreadyConnected,
+    AlreadyInUse,
     NotSupportedOperation,
-    CouldNotConnect
+    CouldNotConnect,
+    InternalError
 }
 
 pub enum SendTypedError<T:TryIntoFromBuffer> {
