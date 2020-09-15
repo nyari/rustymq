@@ -3,7 +3,7 @@ pub use super::*;
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
-use core::message::{TryIntoFromBuffer, TypedMessage, Buffer, Message};
+use core::message::{TypedMessage, Buffer, Message};
 use std::ops::{Deref, DerefMut};
 
 use std::convert::{TryInto, TryFrom};
@@ -39,10 +39,6 @@ impl TryFrom<Buffer> for TestingStruct {
     }
 }
 
-impl TryIntoFromBuffer for TestingStruct {
-
-}
-
 
 #[test]
 fn simple_req_rep_tcp_test() {
@@ -56,8 +52,9 @@ fn simple_req_rep_tcp_test() {
     let message = TypedMessage::new(base);
 
     requestor.send_typed(message, OpFlag::NoWait).unwrap();
-    let received_message = replier.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
-    replier.send_typed(TypedMessage::new(received_message.payload().clone()).continue_exchange_metadata(received_message.metadata().clone()), OpFlag::NoWait).expect("Hello");
+    replier.respond_typed(OpFlag::Default, |rmessage:TypedMessage<TestingStruct>| {
+        TypedMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
+    }).unwrap();
     let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
 
     assert_eq!(base, final_message.into_payload());

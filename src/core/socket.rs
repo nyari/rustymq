@@ -1,7 +1,7 @@
-use core::message::{Message, RawMessage, TypedMessage, TryIntoFromBuffer, PeerId, MessageMetadata};
+use core::message::{Message, RawMessage, TypedMessage, PeerId, MessageMetadata, Buffer};
 use core::transport::{TransportMethod};
 
-use std::convert::{TryFrom};
+use std::convert::{TryFrom, TryInto};
 use std::time::{Duration};
 
 #[derive(Debug)]
@@ -43,19 +43,24 @@ pub enum ConnectorError {
 }
 
 #[derive(Debug)]
-pub enum SendTypedError<T:TryIntoFromBuffer> {
+pub enum SendTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as TryInto<Buffer>>::Error : std::fmt::Debug {
     Socket(SocketError),
     Conversion(<RawMessage as TryFrom<TypedMessage<T>>>::Error)
 }
 
 #[derive(Debug)]
-pub enum ReceiveTypedError<T:TryIntoFromBuffer> {
+pub enum ReceiveTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <Buffer as TryInto<T>>::Error : std::fmt::Debug {
     Socket(SocketError),
     Conversion(<TypedMessage<T> as TryFrom<RawMessage>>::Error)
 }
 
 #[derive(Debug)]
-pub enum QueryTypedError<T:TryIntoFromBuffer> {
+pub enum QueryTypedError<T> 
+    where T: TryInto<Buffer>,
+          Buffer: TryInto<T>,
+          <T as TryInto<Buffer>>::Error : std::fmt::Debug,
+          <Buffer as TryInto<T>>::Error : std::fmt::Debug
+{
     Send(SendTypedError<T>),
     Receive(ReceiveTypedError<T>)
 }
@@ -69,7 +74,10 @@ pub trait Socket : Send + Sync {
 pub trait OutwardSocket : Socket {
     fn send(&mut self, message:RawMessage, flags:OpFlag) -> Result<MessageMetadata, SocketError>;
 
-    fn send_typed<T:TryIntoFromBuffer>(&mut self, message:TypedMessage<T>, flags: OpFlag) -> Result<MessageMetadata, SendTypedError<T>> {
+    fn send_typed<T>(&mut self, message:TypedMessage<T>, flags: OpFlag) -> Result<MessageMetadata, SendTypedError<T>>
+        where T:TryInto<Buffer> + TryFrom<Buffer>,
+              <T as TryInto<Buffer>>::Error: std::fmt::Debug 
+    {
         match RawMessage::try_from(message) {
             Ok(msg) => match self.send(msg, flags) {
                 Ok(metadata) => Ok(metadata),
@@ -83,7 +91,10 @@ pub trait OutwardSocket : Socket {
 pub trait InwardSocket : Socket {
     fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, SocketError>;
 
-    fn receive_typed<T:TryIntoFromBuffer>(&mut self, flags:OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>> {
+    fn receive_typed<T>(&mut self, flags:OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>>
+        where T:TryInto<Buffer> + TryFrom<Buffer>,
+              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
+    {
         match self.receive(flags) {
             Ok(msg) => match TypedMessage::try_from(msg) {
                 Ok(message) => Ok(message),
@@ -101,7 +112,11 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         self.receive(flags)
     }
 
-    fn query_typed<T:TryIntoFromBuffer>(&mut self, message:TypedMessage<T>, flags:OpFlag) -> Result<TypedMessage<T>, QueryTypedError<T>> {
+    fn query_typed<T>(&mut self, message:TypedMessage<T>, flags:OpFlag) -> Result<TypedMessage<T>, QueryTypedError<T>>
+        where T:TryInto<Buffer> + TryFrom<Buffer>,
+              <T as TryInto<Buffer>>::Error: std::fmt::Debug,
+              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
+    {
         match self.send_typed(message, flags.clone()) {
             Ok(_) => match self.receive_typed(flags) {
                 Ok(msg) => Ok(msg),
@@ -119,7 +134,12 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         Ok(())
     }
 
-    fn respond_typed<T:TryIntoFromBuffer, Q: Fn(TypedMessage<T>) -> TypedMessage<T>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<T>> {
+    fn respond_typed<T, Q: Fn(TypedMessage<T>) -> TypedMessage<T>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<T>>
+        where T:TryInto<Buffer> + TryFrom<Buffer>,
+              <T as TryInto<Buffer>>::Error: std::fmt::Debug,
+              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
+
+    {
         match self.receive_typed(flags.clone()) {
             Ok(msg) => {
                 let response = processor(msg);

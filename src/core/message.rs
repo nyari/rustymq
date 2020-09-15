@@ -268,20 +268,15 @@ impl Message for RawMessage {
     }
 }
 
-pub trait TryIntoFromBuffer: TryInto<Buffer> + TryFrom<Buffer> + Sized
-{
-
-}
-
 pub struct TypedMessage<T>
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer>, Buffer: TryInto<T>
 {
     meta: MessageMetadata,
     payload: T
 }
 
 impl<T> TypedMessage<T>
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer>, Buffer: TryInto<T>
 {
     pub fn mutated_payload(self, mutator: &dyn Fn(T) -> T) -> Self {
         Self {
@@ -292,7 +287,7 @@ impl<T> TypedMessage<T>
 }
 
 impl<T> Message for TypedMessage<T>
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer>, Buffer: TryInto<T>
 {
     type Payload = T;
 
@@ -336,35 +331,37 @@ impl<T> Message for TypedMessage<T>
 }
 
 impl<T> TryFrom<TypedMessage<T>> for RawMessage
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as TryInto<Buffer>>::Error : std::fmt::Debug
 {
     type Error = <T as TryInto<Buffer>>::Error;
 
     fn try_from(value: TypedMessage<T>) -> Result<Self, Self::Error> {
-        let payload = value.payload.try_into()?;
+        let meta = value.metadata().clone();
+        let payload: Buffer = value.into_payload().try_into()?;
         Ok(Self {
-            meta: value.meta,
+            meta: meta,
             payload: payload
         })
     }
 }
 
 impl<T> TryFrom<RawMessage> for TypedMessage<T>
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer>, Buffer: TryInto<T>, <Buffer as TryInto<T>>::Error : std::fmt::Debug
 {
-    type Error = <T as TryFrom<Buffer>>::Error;
+    type Error = <Buffer as TryInto<T>>::Error;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let payload = value.payload.try_into()?;
+        let meta = value.metadata().clone();
+        let payload: T = value.into_payload().try_into()?;
         Ok(Self {
-            meta: value.meta,
+            meta: meta,
             payload: payload
         })
     }
 }
 
 impl<T> Deref for TypedMessage<T>
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer> + TryFrom<Buffer>
 {
     type Target = T;
 
@@ -374,7 +371,7 @@ impl<T> Deref for TypedMessage<T>
 }
 
 impl<T> DerefMut for TypedMessage<T> 
-    where T: TryIntoFromBuffer
+    where T: TryInto<Buffer> + TryFrom<Buffer>
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.payload
