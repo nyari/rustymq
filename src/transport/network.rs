@@ -95,13 +95,13 @@ impl RawMessageBufferStreamReader {
     }
 
     pub fn try_parse_raw_message(&mut self) -> Result<RawMessage, SocketError> {
-        let (mut deserializer, actual_bytes) = match FlatDeserializer::new(&self.buffer.as_slice()[..self.len]) {
+        let (mut deserializer, actual_bytes) = match FlatDeserializer::new(&self.buffer[..self.len]) {
             Ok(result) => Ok((result, self.len)),
             Err(serializer::Error::IncorrectBufferSize(actual_size)) => {
                 if self.len < actual_size as usize {
                     Err(SocketError::IncompleteData)
                 } else if self.len > actual_size as usize {
-                    match FlatDeserializer::new(&self.buffer.as_slice()[..actual_size as usize]) {
+                    match FlatDeserializer::new(&self.buffer[..actual_size as usize]) {
                         Ok(result) => Ok((result, actual_size as usize)),
                         Err(_) => Err(SocketError::UnknownDataFormatReceived)
                     }
@@ -135,12 +135,12 @@ impl RawMessageBufferStreamReader {
     fn ensure_batch_size_capacity_at_end_of_buffer<'a>(&'a mut self) {
         self.capacity = std::cmp::max(self.capacity, self.len + self.batch_size);
         if self.capacity > self.buffer.len() {
-            self.buffer.resize(self.capacity - self.buffer.len(), 0u8);
+            self.buffer.resize(self.capacity, 0u8);
         }
     }
 
     fn read_into_buffer<'a, F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState> {
-        match reader.read(&mut self.buffer.as_mut_slice()[self.len..self.batch_size]) {
+        match reader.read(&mut self.buffer[self.len..self.len+self.batch_size]) {
             Ok(amount) => {
                 if amount != 0 {
                     self.len += amount;
@@ -193,11 +193,9 @@ impl RawMessageBufferStreamWriter {
 
     fn get_batch<'a>(&'a self) -> Option<BufferSlice<'a>> {
         if self.offset + self.batch_size < self.buffer.len() {
-            let offset = self.offset;
-            Some(&self.buffer[offset..self.batch_size])
+            Some(&self.buffer[self.offset..self.offset+self.batch_size])
         } else if self.offset < self.buffer.len() {
-            let offset = self.offset;
-            Some(&self.buffer[offset..])
+            Some(&self.buffer[self.offset..])
         } else {
             None
         }
