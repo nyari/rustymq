@@ -19,6 +19,7 @@ const WAIT_TIME_MS: u64 = 128;
 
 impl From<io::Error> for SocketError {
     fn from(error: io::Error) -> Self {
+        println!("{}: {:?}", error, error.kind());
         match error.kind() {
             io::ErrorKind::AddrInUse => SocketError::TransportMethodAlreadyInUse,
             io::ErrorKind::AddrNotAvailable => SocketError::TransportTargetUnreachable,
@@ -128,8 +129,7 @@ impl RawMessageBufferStreamReader {
 
     pub fn read_into<F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState>{
         self.ensure_batch_size_capacity_at_end_of_buffer();
-        self.read_into_buffer(reader)?;
-        Ok(())
+        self.read_into_buffer(reader)
     }
 
     fn ensure_batch_size_capacity_at_end_of_buffer<'a>(&'a mut self) {
@@ -140,9 +140,22 @@ impl RawMessageBufferStreamReader {
     }
 
     fn read_into_buffer<'a, F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState> {
-        let read_amount = reader.read(&mut self.buffer.as_mut_slice()[self.len..self.batch_size])?;
-        self.len += read_amount;
-        Ok(())
+        match reader.read(&mut self.buffer.as_mut_slice()[self.len..self.batch_size]) {
+            Ok(amount) => {
+                if amount != 0 {
+                    self.len += amount;
+                    Ok(())
+                } else {
+                    Err(TCPConnectionStreamState::Connection(SocketError::Timeout))
+                }
+            },
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::TimedOut => Err(TCPConnectionStreamState::Connection(SocketError::Timeout)),
+                std::io::ErrorKind::WouldBlock => Err(TCPConnectionStreamState::Connection(SocketError::Timeout)),
+                _ => Err(TCPConnectionStreamState::from(err))
+            }
+        }
+
     }
 }
 
@@ -203,19 +216,22 @@ impl RawMessageBufferStreamWriter {
     }
 
     pub fn write_into<F: Write>(&mut self, writer:&mut F)-> Result<(), TCPConnectionStreamState> {
-        let result = {match self.get_batch() {
-            Some(buffer_slice) => {
-                Ok(writer.write(buffer_slice)?)
-            },
-            None => {
-                Err(TCPConnectionStreamState::Empty)
-            }
-        }};
+        let result = match self.get_batch() {
+            Some(buffer_slice) => Ok(writer.write(buffer_slice)?),
+            None => Err(TCPConnectionStreamState::Empty)
+        };
 
-        if let Ok(amount) = result {
-            self.progress_amount(amount);
+        match result {
+            Ok(processed_amount) => {
+                self.progress_amount(processed_amount);
+                if self.is_empty() {
+                    Err(TCPConnectionStreamState::Finished)
+                } else {
+                    Ok(())
+                }
+            },
+            Err(err) => Err(err)
         }
-        if self.is_empty() {Err(TCPConnectionStreamState::Finished)} else { result.map(|_| {()}) }
     }
 }
 
@@ -233,7 +249,9 @@ struct TCPConnectionStream {
 impl TCPConnectionStream {
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
+        stream.set_nodelay(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -247,7 +265,9 @@ impl TCPConnectionStream {
     }
 
     pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
-        stream.set_nonblocking(true)?;
+        stream.set_nodelay(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -290,6 +310,7 @@ impl TCPConnectionStream {
     pub fn proceed_sending(&mut self) -> Result<(), TCPConnectionStreamState> {
         match self.writer.write_into(&mut self.stream) {
             Err(TCPConnectionStreamState::Finished) => {
+                self.stream.flush()?;
                 if let Some(metadata) = self.writer.get_metadata() {
                     let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
                     prio_sent_messages.insert(metadata.clone());
@@ -308,6 +329,7 @@ impl TCPConnectionStream {
                 inward_queue.push_back(message);
                 Ok(())
             }
+            Err(SocketError::IncompleteData) => Ok(()),
             Err(err) => Err(TCPConnectionStreamState::from(err))
         }
     }
@@ -434,7 +456,10 @@ impl TCPConnectionWorker {
     pub fn main_loop(mut self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), SocketError> {
         loop {
             loop {
-                let receiving = self.process_receiving()?;
+                let receiving = match self.process_receiving() {
+                    Err(SocketError::Timeout) => Ok(TCPConnectionWorkerState::Free),
+                    _other => _other
+                }.unwrap();
                 let sending = self.process_sending()?;
                 if receiving.is_free() && sending.is_free() {
                     break;

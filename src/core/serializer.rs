@@ -183,7 +183,7 @@ impl<'a> FlatDeserializer<'a> {
 
 impl<'a> Deserializer for FlatDeserializer<'a> {
     fn consume<'b>(&'b mut self, amount: usize) -> Result<BufferSlice<'b>, Error> {
-        if amount > self.buffer.len() - self.offset {
+        if amount + self.offset <= self.buffer.len() {
             let offset = self.offset;
             self.offset += amount;
             Ok(&self.buffer[offset..self.offset])
@@ -276,13 +276,37 @@ mod tests
         let mut ser = FlatSerializer::new();
         ser.serialize(&(0xAA as u8));
         let result = ser.finalize();
-        assert_eq!(result, [0x5A, 0xA5, 0xAA]);
+        assert_eq!(result, [0x5A, 0xA5, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA]);
     }
 
     #[test]
     fn flat_deserializer_1byte_test() {
-        let buffer:[u8; 3] = [0x5A, 0xA5, 0xAA];
+        let buffer:[u8; 11] = [0x5A, 0xA5, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA];
         let mut ser = FlatDeserializer::new(&buffer).unwrap();
         assert_eq!(0xAA, ser.deserialize::<u8>().unwrap());
+    }
+
+    #[test]
+    fn flat_deserializer_shorter() {
+        let buffer:[u8; 10] = [0x5A, 0xA5, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(matches!(FlatDeserializer::new(&buffer), Err(Error::IncorrectBufferSize(11))))
+    }
+
+    #[test]
+    fn flat_deserializer_header_missing_partly() {
+        let buffer:[u8; 8] = [0x5A, 0xA5, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(matches!(FlatDeserializer::new(&buffer), Err(Error::EndOfBuffer)))
+    }
+
+    #[test]
+    fn flat_deserializer_bom_incorrect() {
+        let buffer:[u8; 8] = [0x5A, 0xA6, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert!(matches!(FlatDeserializer::new(&buffer), Err(Error::ByteOrderMarkError)));
+    }
+
+    #[test]
+    fn flat_deserializer_empty() {
+        let buffer:[u8; 0] = [];
+        assert!(matches!(FlatDeserializer::new(&buffer), Err(Error::EndOfBuffer)))
     }
 }

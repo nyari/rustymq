@@ -57,5 +57,7 @@ fn simple_req_rep_tcp_test() {
     }).unwrap();
     let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
 
+    std::thread::sleep(std::time::Duration::from_secs(30));
+
     assert_eq!(base, final_message.into_payload());
 }

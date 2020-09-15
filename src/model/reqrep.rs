@@ -55,7 +55,7 @@ impl ConnectionTracker {
         match message.peer_id() {
             Some(peer_id) => match self.map.get_mut(peer_id) {
                 Some(conversation_ids) => {
-                    if conversation_ids.insert(peer_id.clone()) {
+                    if conversation_ids.insert(message.conversation_id().clone()) {
                         Ok(message)
                     } else {
                         Err(SocketError::DuplicatedConversation)
@@ -84,7 +84,7 @@ impl ConnectionTracker {
     }
 
     pub fn has_live_conversation(&self) -> bool{
-        self.map.values().any(|x| !x.is_empty())
+        !self.map.is_empty()
     }
 }
 
@@ -125,15 +125,11 @@ impl<T> InwardSocket for RequestSocket<T>
     where T: InitiatorTransport {
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
-        if !self.tracker.has_live_conversation() {
-            match self.channel.receive(flags) {
-                Ok(message) => {
-                    self.tracker.close_conversation(message)
-                }
-                Err(err) => Err(err)
+        match self.channel.receive(flags) {
+            Ok(message) => {
+                self.tracker.close_conversation(message)
             }
-        } else {
-            Err(SocketError::IncorrectStateError)
+            Err(err) => Err(err)
         }
     }
 }
@@ -192,6 +188,7 @@ impl<T> InwardSocket for ReplySocket<T>
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
         let message = self.channel.receive(flags)?;
+        self.tracker.accept_peer(message.peer_id().unwrap().clone());
         self.tracker.initiate_new_conversation(message)
     }
 }
