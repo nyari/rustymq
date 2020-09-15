@@ -232,8 +232,10 @@ struct TCPConnectionStream {
 
 impl TCPConnectionStream {
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
+        let stream = net::TcpStream::connect(addr)?;
+        stream.set_nonblocking(true)?;
         Ok(Self {
-            stream: net::TcpStream::connect(addr)?,
+            stream: stream,
 //            addr: addr,
             reader: RawMessageBufferStreamReader::new(BUFFER_BATCH_SIZE),
             writer: RawMessageBufferStreamWriter::new_empty(),
@@ -245,6 +247,7 @@ impl TCPConnectionStream {
     }
 
     pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
+        stream.set_nonblocking(true)?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
