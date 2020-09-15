@@ -3,7 +3,7 @@ pub use super::*;
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
-use core::message::{TryIntoFromBuffer, TypedMessage, Buffer, Message};
+use core::message::{TypedMessage, Buffer, Message};
 use std::ops::{Deref, DerefMut};
 
 use std::convert::{TryInto, TryFrom};
@@ -37,10 +37,6 @@ impl TryFrom<Buffer> for TestingStruct {
             b: deserializer.deserialize_raw::<u64>()?
         })
     }
-}
-
-impl TryIntoFromBuffer for TestingStruct {
-
 }
 
 
