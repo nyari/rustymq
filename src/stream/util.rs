@@ -4,8 +4,8 @@ use core::socket::{SocketError, ConnectorError};
 
 #[derive(Debug)]
 pub enum State {
-    Finished,
     Empty,
+    Remainder,
     Stream(SocketError)
 }
 

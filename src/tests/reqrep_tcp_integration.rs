@@ -62,13 +62,12 @@ fn simple_req_rep_tcp_test() {
 }
 
 #[test]
-#[ignore]
 fn stress_req_rep_tcp_test() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
 
-    replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
-    requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
+    replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
+    requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
 
     let replier_handle = std::thread::spawn(move || { 
         loop {
@@ -83,14 +82,14 @@ fn stress_req_rep_tcp_test() {
 
     let mut messages = HashMap::new();
 
-    for index in 0..1001 {
+    for index in 0..1000 {
         let base = TestingStruct{a: index, b: index};
         let message = TypedMessage::new(base);
         messages.insert(message.conversation_id().clone(), base);
         requestor.send_typed(message, OpFlag::NoWait).unwrap();
     }
 
-    for index in 0..1001 {
+    for index in 0..1000 {
         let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
         let (metadata, payload) = final_message.into_parts();
         let original_payload = messages.get(metadata.conversation_id()).unwrap();

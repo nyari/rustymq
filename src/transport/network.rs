@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::convert::{From};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
-const WAIT_TIME_MS: u64 = 128;
+const WAIT_TIME_MS: u64 = 8;
 
 struct TCPConnectionStream {
     stream: net::TcpStream,
@@ -29,6 +29,7 @@ impl TCPConnectionStream {
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
         stream.set_nodelay(true)?;
+        stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
         Ok(Self {
@@ -45,6 +46,7 @@ impl TCPConnectionStream {
 
     pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
         stream.set_nodelay(true)?;
+        stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
         Ok(Self {
@@ -88,28 +90,24 @@ impl TCPConnectionStream {
 
     pub fn proceed_sending(&mut self) -> Result<(), stream::State> {
         match self.writer.write_into(&mut self.stream) {
-            Err(stream::State::Finished) => {
+            Err(stream::State::Empty) => {
                 if let Some(metadata) = self.writer.get_metadata() {
                     let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
                     prio_sent_messages.insert(metadata.clone());
                 }
-                Err(stream::State::Finished)
+                Err(stream::State::Empty)
             }
             _other => _other
         }
     }
 
     pub fn proceed_receiving(&mut self) -> Result<(), stream::State> {
-        self.reader.read_into(&mut self.stream)?;
-        match self.reader.try_parse_raw_message() {
-            Ok(message) => {
-                let mut inward_queue = self.inward_queue.lock().unwrap();
-                inward_queue.push_back(message);
-                Ok(())
-            }
-            Err(SocketError::IncompleteData) => Ok(()),
-            Err(err) => Err(stream::State::from(err))
+        let messages = self.reader.read_into(&mut self.stream)?;
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        for message in messages.into_iter() {
+            inward_queue.push_back(message);
         }
+        Ok(())
     }
 }
 
@@ -174,7 +172,6 @@ impl TCPConnectionStreamHandle {
 }
 
 #[derive(Debug)]
-#[derive(PartialEq)]
 enum TCPConnectionWorkerState {
     Busy,
     Free
@@ -182,9 +179,9 @@ enum TCPConnectionWorkerState {
 
 impl TCPConnectionWorkerState {
     pub fn is_free(&self) -> bool {
-        *self == TCPConnectionWorkerState::Free
+        matches!(self, TCPConnectionWorkerState::Free)
     }
-} 
+}
 
 struct TCPConnectionWorker {
     stream: TCPConnectionStream,
@@ -209,8 +206,9 @@ impl TCPConnectionWorker {
 
     fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
         match self.stream.proceed_receiving() {
-            Ok(()) => Ok(TCPConnectionWorkerState::Busy),
-            Err(stream::State::Empty) | Err(stream::State::Finished) => {
+            Ok(messages) => Ok(TCPConnectionWorkerState::Busy),
+            Err(stream::State::Remainder) => Ok(TCPConnectionWorkerState::Busy),
+            Err(stream::State::Empty) => {
                 Ok(TCPConnectionWorkerState::Free)
             }
             Err(stream::State::Stream(err)) => Err(err)
@@ -220,24 +218,22 @@ impl TCPConnectionWorker {
     fn process_sending(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
         match self.stream.proceed_sending() {
             Ok(()) => Ok(TCPConnectionWorkerState::Busy),
-            Err(stream::State::Empty) | Err(stream::State::Finished) => {
+            Err(stream::State::Empty) => {
                 if let Err(stream::State::Empty) = self.stream.start_next_message() {
                     Ok(TCPConnectionWorkerState::Free)
                 } else {
                     Ok(TCPConnectionWorkerState::Busy)
                 }
             }
-            Err(stream::State::Stream(err)) => Err(err)
+            Err(stream::State::Stream(err)) => Err(err),
+            Err(stream::State::Remainder) => panic!("Internal error")
         }
     }
 
     pub fn main_loop(mut self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), SocketError> {
         loop {
             loop {
-                let receiving = match self.process_receiving() {
-                    Err(SocketError::Timeout) => Ok(TCPConnectionWorkerState::Free),
-                    _other => _other
-                }.unwrap();
+                let receiving = self.process_receiving()?;
                 let sending = self.process_sending()?;
                 if receiving.is_free() && sending.is_free() {
                     break;
@@ -311,18 +307,16 @@ impl Drop for TCPConnection {
     }
 }
 
-struct TCPConnectionManager {
+struct TCPConnectionManagerPeers {
     peers: HashMap<PeerId, TCPConnection>,
     addresses: HashMap<SocketAddr, PeerId>,
-    inward_queue: VecDeque<RawMessage>
 }
 
-impl TCPConnectionManager {
+impl TCPConnectionManagerPeers {
     pub fn new() -> Self {
         Self {
             peers: HashMap::new(),
-            addresses: HashMap::new(),
-            inward_queue: VecDeque::new()
+            addresses: HashMap::new()
         }
     }
 
@@ -341,9 +335,18 @@ impl TCPConnectionManager {
         }
     }
 
-    pub fn get_message_peer_connection<'a>(&'a self, message: &RawMessage) -> Result<&'a TCPConnection, SocketError> {
-        match message.peer_id() {
-            Some(peerid) => match self.peers.get(peerid) {
+    pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+        let connection = self.get_message_peer_connection(message.peer_id())?;
+        match flags {
+            OpFlag::Default => {connection.send(message); Ok(())},
+            OpFlag::NoWait => Ok(connection.send_async(message)),
+            opflag => Err(SocketError::UnsupportedOpFlag(opflag))
+        }
+    }
+
+    fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a TCPConnection, SocketError> {
+        match peer_id {
+            Some(peerid) => match self.peers.get(&peerid) {
                 Some(connection) => Ok(connection),
                 None => Err(SocketError::UnknownPeer)
             },
@@ -355,8 +358,25 @@ impl TCPConnectionManager {
         }
     }
 
+    fn connect_internal(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+        match TCPConnection::connect(address) {
+            Ok(connection) => self.commit_onnection(connection),
+            Err(_) => Err(ConnectorError::CouldNotConnect)
+        }
+    }
+
     pub fn transform_received_message(&self, message: RawMessage, address: SocketAddr) -> RawMessage {
         message.apply_peer_id(self.addresses.get(&address).unwrap().clone())
+    }
+
+    fn receive_from_all_connections(&self) -> Vec<RawMessage> {
+        let mut results = Vec::new();
+        self.peers.values().for_each(|connection| {
+            while let Some(message) = connection.receive_async() {
+                results.push(self.transform_received_message(message, connection.get_address()))
+            }
+        });
+        results
     }
 
     fn commit_onnection(&mut self, connection: TCPConnection) -> Result<PeerId, ConnectorError> {
@@ -369,36 +389,47 @@ impl TCPConnectionManager {
         Ok(peerid)
     }
 
-    fn connect_internal(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
-        match TCPConnection::connect(address) {
-            Ok(connection) => self.commit_onnection(connection),
-            Err(_) => Err(ConnectorError::CouldNotConnect)
-        }
-    }
-
-    fn receive_from_all_connections(&mut self){
-        let mut results = Vec::new();
-        self.peers.values().for_each(|connection| {
-            while let Some(message) = connection.receive_async() {
-                results.push(self.transform_received_message(message, connection.get_address()))
-            }
-        });
-        self.inward_queue.extend(results.into_iter())
-    }
-
     fn is_already_connected(&self, address: &SocketAddr) -> bool {
         self.peers.values().find(|x| x.get_address() == *address).is_some()
     }
 }
 
+struct TCPConnectionManager {
+    peers: Arc<Mutex<TCPConnectionManagerPeers>>,
+    inward_queue: VecDeque<RawMessage>
+}
+
+impl TCPConnectionManager {
+    pub fn new() -> Self {
+        Self {
+            peers: Arc::new(Mutex::new(TCPConnectionManagerPeers::new())),
+            inward_queue: VecDeque::new()
+        }
+    }
+
+    pub fn get_peers(&self) -> Arc<Mutex<TCPConnectionManagerPeers>> {
+        self.peers.clone()
+    }
+
+    pub fn connect(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+        let mut peers = self.peers.lock().unwrap();
+        peers.connect(address)
+    }
+
+    pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+        let peers = self.peers.lock().unwrap();
+        peers.send_message(message, flags)
+    }
+
+    fn receive_from_all_connections(&mut self) {
+        let peers = self.peers.lock().unwrap();
+        self.inward_queue.extend(peers.receive_from_all_connections().into_iter())
+    }
+}
+
 impl Transport for TCPConnectionManager {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
-        let connection = self.get_message_peer_connection(&message)?;
-        match flags {
-            OpFlag::Default => {connection.send(message); Ok(())},
-            OpFlag::NoWait => Ok(connection.send_async(message)),
-            opflag => Err(SocketError::UnsupportedOpFlag(opflag))
-        }
+        self.send_message(message, flags)
     }
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
@@ -462,12 +493,12 @@ impl InitiatorTransport for TCPInitiatorTransport {
 }
 
 struct TCPConnectionListener {
-    manager: Arc<Mutex<TCPConnectionManager>>,
+    manager: Arc<Mutex<TCPConnectionManagerPeers>>,
     listener: net::TcpListener
 }
 
 impl TCPConnectionListener {
-    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<TCPConnectionManager>>) -> Result<Self, ConnectorError> {
+    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<TCPConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
         Ok(Self {
             manager: manager,
             listener: net::TcpListener::bind(addr)?
@@ -475,34 +506,44 @@ impl TCPConnectionListener {
     }
 
     pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
-        while let Ok(incoming) = self.listener.accept() {
-            {
-                let mut manager = self.manager.lock().unwrap();
-                manager.inward_connection(incoming)?;
+        self.listener.set_nonblocking(true).unwrap();
+        loop {
+            loop {
+                match self.listener.accept() {
+                    Ok(incoming) => {
+                        let mut manager = self.manager.lock().unwrap();
+                        manager.inward_connection(incoming).unwrap();
+                    },
+                    Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
+                                matches!(err.kind(), std::io::ErrorKind::TimedOut) => {
+                        break Ok(());
+                    },
+                    Err(err) => break Err(err)
+                };
+            }.unwrap();
+
+            if *stop_semaphore.lock().unwrap() {
+                break;
             }
-            {
-                if *stop_semaphore.lock().unwrap() {
-                    break;
-                }
-            }
-        }
+
+            thread::sleep(std::time::Duration::from_millis(WAIT_TIME_MS));
+        };
 
         Ok(())
     }
 }
 
 pub struct TCPAcceptorTransport {
-    manager: Arc<Mutex<TCPConnectionManager>>,
+    manager: TCPConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
     stop_semaphore: Arc<Mutex<bool>>
 }
 
 impl TCPAcceptorTransport {
     pub fn new() -> Self {
-        let manager = Arc::new(Mutex::new(TCPConnectionManager::new()));
         let stop_semaphore = Arc::new(Mutex::new(false));
         Self {
-            manager: manager,
+            manager: TCPConnectionManager::new(),
             listener_thread: None,
             stop_semaphore
         }
@@ -511,13 +552,11 @@ impl TCPAcceptorTransport {
 
 impl Transport for TCPAcceptorTransport {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
-        let mut manager = self.manager.lock().unwrap();
-        manager.send(message, flags)
+        self.manager.send(message, flags)
     }
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
-        let mut manager = self.manager.lock().unwrap();
-        manager.receive(flags)
+        self.manager.receive(flags)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -528,12 +567,23 @@ impl Transport for TCPAcceptorTransport {
 impl AcceptorTransport for TCPAcceptorTransport {
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         if let TransportMethod::Network(addr) = target {
-            let listener = TCPConnectionListener::bind(addr, self.manager.clone())?;
+            let listener = TCPConnectionListener::bind(addr, self.manager.get_peers())?;
             let stop_semaphore = self.stop_semaphore.clone();
             self.listener_thread = Some(thread::spawn(move || {listener.main_loop(stop_semaphore)}));
             Ok(None)
         } else {
             Err(ConnectorError::InvalidTransportMethod)
         }
+    }
+}
+
+impl Drop for TCPAcceptorTransport {
+    #[allow(unused_must_use)]
+    fn drop(&mut self) {
+        {
+            let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
+            *stop_semaphore = true;
+        }
+        self.listener_thread.take().unwrap().join().unwrap();
     }
 }
