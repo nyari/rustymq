@@ -86,3 +86,86 @@ impl RawMessageReader {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::message::{Message};
+    use core::serializer::{FlatSerializer, Serializable, Serializer};
+    use std::io::Cursor;
+
+    impl PartialEq for RawMessage {
+        fn eq(&self, other: &Self) -> bool {
+            self.metadata() == other.metadata() &&
+            self.payload() == other.payload()
+        }
+    }
+
+    impl From<RawMessage> for Buffer {
+        fn from(message: RawMessage) -> Self {
+            let mut ser = FlatSerializer::new();
+            ser.serialize_pass(message);
+            ser.finalize()
+        }
+    }
+
+    #[test]
+    fn test_single_message_read_2048_batch_size() {
+        let original_message = RawMessage::new(vec![0xAA, 0x01, 0x02, 0x03, 0x34]);
+        let mut cursor:Cursor<Buffer> = Cursor::new(original_message.clone().into());
+        let mut reader = RawMessageReader::new(2048);
+        reader.read_into(&mut cursor).unwrap();
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message);
+    }
+
+    #[test]
+    fn test_single_message_read_8_batch_size() {
+        let original_message = RawMessage::new(vec![0xAA, 0x01, 0x02, 0x03, 0x34]);
+        let mut cursor:Cursor<Buffer> = Cursor::new(original_message.clone().into());
+        let mut reader = RawMessageReader::new(8);
+        for _i in 0..(cursor.get_ref().len()/8) {
+            reader.read_into(&mut cursor).unwrap();
+            assert!(matches!(reader.try_parse_raw_message(), Err(SocketError::IncompleteData)))
+        }
+        reader.read_into(&mut cursor).unwrap();
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message);
+    }
+
+    #[test]
+    fn test_two_message_read_2048_batch_size() {
+        let original_message = RawMessage::new(vec![0xAA, 0x01, 0x02, 0x03, 0x34]);
+        let mut buffer:Buffer = original_message.clone().into();
+        buffer.append(&mut original_message.clone().into());
+
+        let mut cursor:Cursor<Buffer> = Cursor::new(buffer);
+        let mut reader = RawMessageReader::new(2048);
+        reader.read_into(&mut cursor).unwrap();
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message.clone());
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message.clone());
+    }
+
+    #[test]
+    fn test_two_message_read_8_batch_size() {
+        let original_message = RawMessage::new(vec![0xAA, 0x01, 0x02, 0x03, 0x34]);
+        let mut buffer:Buffer = original_message.clone().into();
+        buffer.append(&mut original_message.clone().into());
+
+        let mut cursor:Cursor<Buffer> = Cursor::new(buffer);
+        let mut reader = RawMessageReader::new(8);
+        for _i in 0..(cursor.get_ref().len()/(8*2)) {
+            reader.read_into(&mut cursor).unwrap();
+            assert!(matches!(reader.try_parse_raw_message(), Err(SocketError::IncompleteData)))
+        }
+        reader.read_into(&mut cursor).unwrap();
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message);
+        assert!(matches!(reader.try_parse_raw_message(), Err(SocketError::IncompleteData)));
+        for _i in 0..(cursor.get_ref().len()/(8*2) - 1) {
+            reader.read_into(&mut cursor).unwrap();
+            assert!(matches!(reader.try_parse_raw_message(), Err(SocketError::IncompleteData)))
+        }
+        reader.read_into(&mut cursor).unwrap();
+        assert_eq!(reader.try_parse_raw_message().unwrap(), original_message);
+        assert!(matches!(reader.try_parse_raw_message(), Err(SocketError::IncompleteData)));
+    }
+
+}
