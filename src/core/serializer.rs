@@ -16,10 +16,12 @@ pub enum Error {
 pub trait Serializer : Sized {
     fn append<'a>(&mut self, slice: BufferSlice<'a>);
     
+    #[inline]
     fn serialize<T:Serializable>(&mut self, serializable: &T) {
         serializable.serialize(self);
     }
-
+    
+    #[inline]
     fn serialize_pass<T:Serializable>(&mut self, serializable: T) {
         self.serialize(&serializable)
     }
@@ -30,8 +32,8 @@ pub trait Serializer : Sized {
     fn serialize_raw<T:RawSerializable>(&mut self, serializable: &T) {
         self.append(sized_to_byte_slice(serializable));
     }
-    #[inline]
 
+    #[inline]
     fn serialize_raw_slice<T:RawSerializable>(&mut self, slice: &[T]) {
         self.serialize_raw(&(slice.len() as u64));
         self.append(sized_slice_to_byte_slice(slice));
@@ -51,7 +53,6 @@ pub trait Deserializer : Sized {
         }
     }
 
-    #[inline]
     fn deserialize_raw_slice<T:RawSerializable>(&mut self) -> Result<Vec<T>, Error> {
         let length = (self.deserialize_raw::<u64>()?) as usize;
         let byte_slice = self.consume(std::mem::size_of::<T>() * length)?;
@@ -85,6 +86,8 @@ pub trait RawSerializable where Self: Sized + Copy {
 
 impl<U: Serializable> Serializable for Option<U> 
     where U: Serializable {
+    
+    #[inline]
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         match self {
             Some(value) => {
@@ -97,6 +100,7 @@ impl<U: Serializable> Serializable for Option<U>
         }
     }
 
+    #[inline]
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, Error> {
         match deserializer.deserialize::<u8>()? {
             1 => {
@@ -139,6 +143,7 @@ impl FlatSerializer {
 }
 
 impl Serializer for FlatSerializer {
+    #[inline]
     fn append<'a>(&mut self, slice: BufferSlice<'a>) {
         self.buffer.extend_from_slice(slice)
     }
@@ -182,6 +187,7 @@ impl<'a> FlatDeserializer<'a> {
 }
 
 impl<'a> Deserializer for FlatDeserializer<'a> {
+    #[inline]
     fn consume<'b>(&'b mut self, amount: usize) -> Result<BufferSlice<'b>, Error> {
         if amount + self.offset <= self.buffer.len() {
             let offset = self.offset;
@@ -192,6 +198,7 @@ impl<'a> Deserializer for FlatDeserializer<'a> {
         }
     }
 
+    #[inline]
     fn deserialize<T:Serializable>(&mut self) -> Result<T, Error> {
         let offset = self.offset;
         let result = T::deserialize(self);
@@ -201,6 +208,7 @@ impl<'a> Deserializer for FlatDeserializer<'a> {
         result
     }
 
+    #[inline]
     fn byte_order_correction(&self) -> bool {
         self.swap_byte_order
     }

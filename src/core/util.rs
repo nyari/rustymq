@@ -9,6 +9,7 @@ use core::serializer;
 #[derive(Hash)]
 #[derive(Clone)]
 #[derive(Copy)]
+#[derive(Debug)]
 pub struct Identifier
 {
     core: u64  

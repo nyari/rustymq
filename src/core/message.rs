@@ -32,6 +32,7 @@ pub type PeerId = Identifier;
 #[derive(PartialEq)]
 #[derive(Eq)]
 #[derive(Hash)]
+#[derive(Debug)]
 pub struct MessageMetadata {
     messageid: MessageId,
     conversationid: ConversationId,
@@ -220,6 +221,8 @@ pub trait Message: Sized
     }
 }
 
+#[derive(Clone)]
+#[derive(Debug)]
 pub struct RawMessage
 {
     meta: MessageMetadata,
