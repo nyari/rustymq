@@ -2,14 +2,11 @@ use core::message::{PeerId, Message, RawMessage, MessageMetadata};
 use core::util;
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag};
-use core::serializer;
-use core::serializer::{FlatSerializer, FlatDeserializer, Serializer, Serializable, Buffer, BufferSlice};
+use stream;
 
 use std::collections::{HashMap, VecDeque, HashSet};
 use std::net;
 use std::net::{SocketAddr};
-use std::io;
-use std::io::{Write, Read};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::convert::{From};
@@ -17,227 +14,11 @@ use std::convert::{From};
 const BUFFER_BATCH_SIZE: usize = 2048;
 const WAIT_TIME_MS: u64 = 128;
 
-impl From<io::Error> for SocketError {
-    fn from(error: io::Error) -> Self {
-        println!("{}: {:?}", error, error.kind());
-        match error.kind() {
-            io::ErrorKind::AddrInUse => SocketError::TransportMethodAlreadyInUse,
-            io::ErrorKind::AddrNotAvailable => SocketError::TransportTargetUnreachable,
-            io::ErrorKind::AlreadyExists => SocketError::TransportMethodAlreadyInUse,
-            io::ErrorKind::BrokenPipe => SocketError::Disconnected,
-            io::ErrorKind::ConnectionAborted => SocketError::Disconnected,
-            io::ErrorKind::ConnectionRefused => SocketError::ConnectionRefused,
-            io::ErrorKind::Interrupted => SocketError::Disconnected,
-            io::ErrorKind::InvalidData => SocketError::InternalError,
-            io::ErrorKind::InvalidInput => SocketError::InternalError,
-            io::ErrorKind::NotConnected => SocketError::Disconnected,
-            io::ErrorKind::TimedOut => SocketError::Timeout,
-            io::ErrorKind::Other => SocketError::InternalError,
-            _ => SocketError::InternalError,
-        }
-    }
-}
-
-impl From<io::Error> for ConnectorError {
-    fn from(error: io::Error) -> Self {
-        match error.kind() {
-            io::ErrorKind::AddrInUse => ConnectorError::AlreadyInUse,
-            io::ErrorKind::AddrNotAvailable => ConnectorError::CouldNotConnect,
-            io::ErrorKind::AlreadyExists => ConnectorError::AlreadyConnected,
-            io::ErrorKind::BrokenPipe => ConnectorError::InternalError,
-            io::ErrorKind::ConnectionAborted => ConnectorError::InternalError,
-            io::ErrorKind::ConnectionRefused => ConnectorError::InternalError,
-            io::ErrorKind::Interrupted => ConnectorError::InternalError,
-            io::ErrorKind::InvalidData => ConnectorError::InternalError,
-            io::ErrorKind::InvalidInput => ConnectorError::InternalError,
-            io::ErrorKind::NotConnected => ConnectorError::CouldNotConnect,
-            io::ErrorKind::TimedOut => ConnectorError::InternalError,
-            io::ErrorKind::Other => ConnectorError::InternalError,
-            _ => ConnectorError::InternalError,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum TCPConnectionStreamState {
-    Finished,
-    Empty,
-    Connection(SocketError)
-}
-
-impl From<io::Error> for TCPConnectionStreamState {
-    fn from(error: io::Error) -> Self {
-        TCPConnectionStreamState::Connection(SocketError::from(error))
-    }
-}
-
-impl From<SocketError> for TCPConnectionStreamState {
-    fn from(error: SocketError) -> Self {
-        TCPConnectionStreamState::Connection(error)
-    }
-}
-
-struct RawMessageBufferStreamReader {
-    buffer: Buffer,
-    batch_size: usize,
-    len: usize,
-    capacity: usize
-}
-
-impl RawMessageBufferStreamReader {
-    pub fn new(batch_size: usize) -> Self {
-        Self {
-            buffer: Buffer::with_capacity(batch_size),
-            batch_size: batch_size,
-            capacity: batch_size,
-            len: 0
-        }
-    }
-
-    pub fn try_parse_raw_message(&mut self) -> Result<RawMessage, SocketError> {
-        let (mut deserializer, actual_bytes) = match FlatDeserializer::new(&self.buffer[..self.len]) {
-            Ok(result) => Ok((result, self.len)),
-            Err(serializer::Error::IncorrectBufferSize(actual_size)) => {
-                if self.len < actual_size as usize {
-                    Err(SocketError::IncompleteData)
-                } else if self.len > actual_size as usize {
-                    match FlatDeserializer::new(&self.buffer[..actual_size as usize]) {
-                        Ok(result) => Ok((result, actual_size as usize)),
-                        Err(_) => Err(SocketError::UnknownDataFormatReceived)
-                    }
-                } else {
-                    Err(SocketError::UnknownDataFormatReceived)
-                }
-            }
-            Err(serializer::Error::EndOfBuffer) => Err(SocketError::IncompleteData),
-            _ => Err(SocketError::UnknownDataFormatReceived),
-        }?;
-
-        match RawMessage::deserialize(&mut deserializer) {
-            Ok(message) => {
-                self.buffer.copy_within(actual_bytes.., 0usize);
-                self.len = self.len - actual_bytes;
-                self.capacity = self.len;
-                self.buffer.truncate(self.len);
-                Ok(message)
-            }
-            Err(serializer::Error::DemarshallingFailed) | Err(serializer::Error::ByteOrderMarkError) => Err(SocketError::UnknownDataFormatReceived),
-            Err(serializer::Error::EndOfBuffer) => Err(SocketError::InternalError),
-            _ => panic!("Any other case should already have been handled")
-        }
-    }
-
-    pub fn read_into<F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState>{
-        self.ensure_batch_size_capacity_at_end_of_buffer();
-        self.read_into_buffer(reader)
-    }
-
-    fn ensure_batch_size_capacity_at_end_of_buffer<'a>(&'a mut self) {
-        self.capacity = std::cmp::max(self.capacity, self.len + self.batch_size);
-        if self.capacity > self.buffer.len() {
-            self.buffer.resize(self.capacity, 0u8);
-        }
-    }
-
-    fn read_into_buffer<'a, F: Read>(&mut self, reader:&mut F) -> Result<(), TCPConnectionStreamState> {
-        match reader.read(&mut self.buffer[self.len..self.len+self.batch_size]) {
-            Ok(amount) => {
-                if amount != 0 {
-                    self.len += amount;
-                    Ok(())
-                } else {
-                    Err(TCPConnectionStreamState::Connection(SocketError::Timeout))
-                }
-            },
-            Err(err) => match err.kind() {
-                std::io::ErrorKind::TimedOut => Err(TCPConnectionStreamState::Connection(SocketError::Timeout)),
-                std::io::ErrorKind::WouldBlock => Err(TCPConnectionStreamState::Connection(SocketError::Timeout)),
-                _ => Err(TCPConnectionStreamState::from(err))
-            }
-        }
-
-    }
-}
-
-struct RawMessageBufferStreamWriter {
-    buffer: Buffer,
-    metadata: Option<MessageMetadata>,
-    batch_size: usize,
-    offset: usize
-}
-
-impl RawMessageBufferStreamWriter {
-    pub fn new(message: RawMessage, batch_size: usize, store_metadata: bool) -> Self {
-        Self {
-            buffer: {let mut serializer = FlatSerializer::new();
-                     serializer.serialize(&message);
-                     serializer.finalize()},
-            metadata: if store_metadata {Some(message.into_metadata())} else {None},
-            batch_size: batch_size,
-            offset: 0
-        }
-    }
-
-    pub fn new_empty() -> Self {
-        Self {
-            buffer: Buffer::new(),
-            metadata: None,
-            batch_size: 0,
-            offset: 0
-        }
-    }
-
-    pub fn get_metadata(&self) -> &Option<MessageMetadata> {
-        &self.metadata
-    }
-
-    fn get_batch<'a>(&'a self) -> Option<BufferSlice<'a>> {
-        if self.offset + self.batch_size < self.buffer.len() {
-            Some(&self.buffer[self.offset..self.offset+self.batch_size])
-        } else if self.offset < self.buffer.len() {
-            Some(&self.buffer[self.offset..])
-        } else {
-            None
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.offset >= self.buffer.len()
-    }
-
-    fn progress_amount(&mut self, amount: usize) {
-        if amount <= self.batch_size {
-            self.offset += amount
-        } else {
-            panic!("Cannot push back more than batch size")
-        }
-    }
-
-    pub fn write_into<F: Write>(&mut self, writer:&mut F)-> Result<(), TCPConnectionStreamState> {
-        let result = match self.get_batch() {
-            Some(buffer_slice) => Ok(writer.write(buffer_slice)?),
-            None => Err(TCPConnectionStreamState::Empty)
-        };
-
-        match result {
-            Ok(processed_amount) => {
-                self.progress_amount(processed_amount);
-                if self.is_empty() {
-                    Err(TCPConnectionStreamState::Finished)
-                } else {
-                    Ok(())
-                }
-            },
-            Err(err) => Err(err)
-        }
-    }
-}
-
 struct TCPConnectionStream {
     stream: net::TcpStream,
 //    addr: SocketAddr,
-    reader: RawMessageBufferStreamReader,
-    writer: RawMessageBufferStreamWriter,
+    reader: stream::RawMessageReader,
+    writer: stream::RawMessageWriter,
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
     prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
     prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
@@ -253,8 +34,8 @@ impl TCPConnectionStream {
         Ok(Self {
             stream: stream,
 //            addr: addr,
-            reader: RawMessageBufferStreamReader::new(BUFFER_BATCH_SIZE),
-            writer: RawMessageBufferStreamWriter::new_empty(),
+            reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
+            writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -269,8 +50,8 @@ impl TCPConnectionStream {
         Ok(Self {
             stream: stream,
 //            addr: addr,
-            reader: RawMessageBufferStreamReader::new(BUFFER_BATCH_SIZE),
-            writer: RawMessageBufferStreamWriter::new_empty(),
+            reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
+            writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -295,31 +76,30 @@ impl TCPConnectionStream {
         outward_queue.pop_front()
     }
 
-    pub fn start_next_message(&mut self) -> Result<(), TCPConnectionStreamState> {
+    pub fn start_next_message(&mut self) -> Result<(), stream::State> {
         if let Some(message) = self.get_outward_message_from_prio_queue() {
-            Ok(self.writer = RawMessageBufferStreamWriter::new(message, BUFFER_BATCH_SIZE, true))
+            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, true))
         } else if let Some(message) = self.get_outward_message_from_normal_queue() {
-            Ok(self.writer = RawMessageBufferStreamWriter::new(message, BUFFER_BATCH_SIZE, false))
+            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, false))
         } else {
-            Err(TCPConnectionStreamState::Empty)
+            Err(stream::State::Empty)
         }
     }
 
-    pub fn proceed_sending(&mut self) -> Result<(), TCPConnectionStreamState> {
+    pub fn proceed_sending(&mut self) -> Result<(), stream::State> {
         match self.writer.write_into(&mut self.stream) {
-            Err(TCPConnectionStreamState::Finished) => {
-                self.stream.flush()?;
+            Err(stream::State::Finished) => {
                 if let Some(metadata) = self.writer.get_metadata() {
                     let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
                     prio_sent_messages.insert(metadata.clone());
                 }
-                Err(TCPConnectionStreamState::Finished)
+                Err(stream::State::Finished)
             }
             _other => _other
         }
     }
 
-    pub fn proceed_receiving(&mut self) -> Result<(), TCPConnectionStreamState> {
+    pub fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         self.reader.read_into(&mut self.stream)?;
         match self.reader.try_parse_raw_message() {
             Ok(message) => {
@@ -328,7 +108,7 @@ impl TCPConnectionStream {
                 Ok(())
             }
             Err(SocketError::IncompleteData) => Ok(()),
-            Err(err) => Err(TCPConnectionStreamState::from(err))
+            Err(err) => Err(stream::State::from(err))
         }
     }
 }
@@ -430,24 +210,24 @@ impl TCPConnectionWorker {
     fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
         match self.stream.proceed_receiving() {
             Ok(()) => Ok(TCPConnectionWorkerState::Busy),
-            Err(TCPConnectionStreamState::Empty) | Err(TCPConnectionStreamState::Finished) => {
+            Err(stream::State::Empty) | Err(stream::State::Finished) => {
                 Ok(TCPConnectionWorkerState::Free)
             }
-            Err(TCPConnectionStreamState::Connection(err)) => Err(err)
+            Err(stream::State::Stream(err)) => Err(err)
         }
     }
 
     fn process_sending(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
         match self.stream.proceed_sending() {
             Ok(()) => Ok(TCPConnectionWorkerState::Busy),
-            Err(TCPConnectionStreamState::Empty) | Err(TCPConnectionStreamState::Finished) => {
-                if let Err(TCPConnectionStreamState::Empty) = self.stream.start_next_message() {
+            Err(stream::State::Empty) | Err(stream::State::Finished) => {
+                if let Err(stream::State::Empty) = self.stream.start_next_message() {
                     Ok(TCPConnectionWorkerState::Free)
                 } else {
                     Ok(TCPConnectionWorkerState::Busy)
                 }
             }
-            Err(TCPConnectionStreamState::Connection(err)) => Err(err)
+            Err(stream::State::Stream(err)) => Err(err)
         }
     }
 

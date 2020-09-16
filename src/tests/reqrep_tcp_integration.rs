@@ -1,4 +1,4 @@
-pub use super::*;
+pub use super::super::*;
 
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
@@ -62,6 +62,7 @@ fn simple_req_rep_tcp_test() {
 }
 
 #[test]
+#[ignore]
 fn stress_req_rep_tcp_test() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
