@@ -14,4 +14,4 @@ Cargo.lock
 /output/*
 
 # Profiling
-*perf.data*% 
+*perf.data* 
