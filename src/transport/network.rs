@@ -12,6 +12,7 @@ use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
+use std::cell::{RefCell};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
@@ -262,7 +263,7 @@ impl TCPConnectionWorker {
 struct TCPConnection {
     handle: TCPConnectionStreamHandle,
     addr: SocketAddr,
-    worker_thread: Option<std::thread::JoinHandle<Result<(), SocketError>>>,
+    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketError>>>>,
     stop_semaphore: StoppedSemaphore
 }
 
@@ -273,9 +274,20 @@ impl TCPConnection {
         Ok(Self {
             handle: handle,
             addr: addr,
-            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } )),
+            worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
             stop_semaphore: stop_semaphore_clone
         })
+    }
+
+    pub fn check_worker_state(&self) -> Result<(), SocketError> {
+        if self.stop_semaphore.is_stopped() {
+            match self.worker_thread.borrow_mut().take().unwrap().join() {
+                Ok(result) => result,
+                Err(_) => Err(SocketError::InternalError)
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
@@ -312,7 +324,10 @@ impl Drop for TCPConnection {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
         self.stop_semaphore.stop();
-        self.worker_thread.take().unwrap().join().unwrap();
+        match self.worker_thread.borrow_mut().take() {
+            Some(join_handle) => { join_handle.join(); },
+            None => ()
+        }
     }
 }
 
