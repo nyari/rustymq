@@ -63,7 +63,7 @@ fn simple_req_rep_tcp_test() {
 }
 
 #[test]
-fn stress_req_rep_tcp_test() {
+fn stress_simple_req_rep_tcp_test() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
 

@@ -13,17 +13,20 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
-const THREAD_WAIT_TIME_MS_LOW: u64 = 0;
-const THREAD_WAIT_TIME_MS_HIGH: u64 = 500;
-const THREAD_WAIT_TIME_MS_STEPS: u16 = 20;
-const THREAD_WAIT_TIME_MS_DEBOOUNCE: usize = 500000;
-const SOCKET_TIMEOUT_MS: u64 = 16;
+const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 
 fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
     DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
-        Duration::from_millis(THREAD_WAIT_TIME_MS_LOW),
-        Duration::from_millis(THREAD_WAIT_TIME_MS_HIGH),
-        THREAD_WAIT_TIME_MS_STEPS), THREAD_WAIT_TIME_MS_DEBOOUNCE)
+        Duration::from_millis(0),
+        Duration::from_millis(500),
+        20), 500000)
+}
+
+fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
+    DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
+        Duration::from_millis(0),
+        Duration::from_millis(100),
+        10), 100)
 }
 
 struct TCPConnectionStream {
@@ -42,7 +45,7 @@ impl TCPConnectionStream {
         let stream = net::TcpStream::connect(addr)?;
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -58,7 +61,7 @@ impl TCPConnectionStream {
     pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -154,12 +157,7 @@ impl TCPConnectionStreamHandle {
     fn wait_for_message(&self, metadata: MessageMetadata) {
         util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
             let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-            if prio_sent_messages.contains(&metadata) {
-                prio_sent_messages.remove(&metadata);
-                Some(())
-            } else {
-                None
-            }
+            prio_sent_messages.take(&metadata).map(|_| {()})
         })
     }
 
@@ -175,7 +173,7 @@ impl TCPConnectionStreamHandle {
     }
 
     pub fn receive(&self) -> Result<RawMessage, SocketError> {
-        Ok(util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
+        Ok(util::thread::wait_for_backoff(query_acceptor_thread_default_duration_backoff(), || {
             self.receive_async()
         }))
     }
@@ -520,7 +518,7 @@ impl TCPConnectionListener {
 
     pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
         self.listener.set_nonblocking(true).unwrap();
-        let mut sleep_backoff = query_thread_default_duration_backoff();
+        let mut sleep_backoff = query_acceptor_thread_default_duration_backoff();
         loop { 
             loop {
                 match self.listener.accept() {
