@@ -82,10 +82,6 @@ impl ConnectionTracker {
             None => Err(SocketError::UnknownPeer)
         }
     }
-
-    pub fn has_live_conversation(&self) -> bool{
-        !self.map.is_empty()
-    }
 }
 
 pub struct RequestSocket<T: InitiatorTransport> {

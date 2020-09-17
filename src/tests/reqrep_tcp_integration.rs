@@ -3,11 +3,11 @@ pub use super::super::*;
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
-use core::message::{TypedMessage, Buffer, Message, ConversationId};
-use std::ops::{Deref, DerefMut};
+use core::message::{TypedMessage, Buffer, Message};
 use std::collections::{HashMap};
+//use std::sync::{Arc, Mutex};
 
-use std::convert::{TryInto, TryFrom};
+use std::convert::{TryFrom};
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -63,13 +63,16 @@ fn simple_req_rep_tcp_test() {
 
 #[test]
 fn stress_req_rep_tcp_test() {
+    //TODO Appropiately close thread
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
 
     replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
     requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
 
-    let replier_handle = std::thread::spawn(move || { 
+    //let stop_semaphore = Arc::new(Mutex::new(false));
+    //let stop_semaphore_clone = stop_semaphore.clone();
+    let _replier_handle = std::thread::spawn(move || { 
         loop {
             replier.respond_typed(OpFlag::Default, |rmessage:TypedMessage<TestingStruct>| {
                 let (metadata, mut payload) = rmessage.into_parts();
@@ -89,12 +92,14 @@ fn stress_req_rep_tcp_test() {
         requestor.send_typed(message, OpFlag::NoWait).unwrap();
     }
 
-    for index in 0..1000 {
+    for _index in 0..1000 {
         let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
         let (metadata, payload) = final_message.into_parts();
         let original_payload = messages.get(metadata.conversation_id()).unwrap();
-        println!("{}", original_payload.a);
         assert_eq!(original_payload.a * 2, payload.a);
         assert_eq!(original_payload.b * 7, payload.b);
     }
+
+    //*stop_semaphore_clone.lock().unwrap() = true;
+    //_replier_handle.join().unwrap();
 }

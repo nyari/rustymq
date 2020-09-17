@@ -69,16 +69,6 @@ impl VersionInfo {
     }
 }
 
-pub struct UnixTime {
-    unix_sec: u64,
-    unix_ns: u32
-}
-
-pub struct UnixTimespan {
-    sec: i64,
-    ns: i32
-}
-
 impl Serializable for Identifier {
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.core);

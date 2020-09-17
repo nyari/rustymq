@@ -9,7 +9,6 @@ use std::net;
 use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
-use std::convert::{From};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 const THREAD_WAIT_TIME_MS: u64 = 0;
@@ -205,7 +204,7 @@ impl TCPConnectionWorker {
 
     fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
         match self.stream.proceed_receiving() {
-            Ok(messages) => Ok(TCPConnectionWorkerState::Busy),
+            Ok(()) => Ok(TCPConnectionWorkerState::Busy),
             Err(stream::State::Remainder) => Ok(TCPConnectionWorkerState::Busy),
             Err(stream::State::Empty) => {
                 Ok(TCPConnectionWorkerState::Free)

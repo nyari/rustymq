@@ -122,7 +122,7 @@ impl RawMessageReader {
 mod tests {
     use super::*;
     use core::message::{Message};
-    use core::serializer::{FlatSerializer, Serializable, Serializer};
+    use core::serializer::{FlatSerializer, Serializer};
     use std::io::Cursor;
 
     impl PartialEq for RawMessage {
