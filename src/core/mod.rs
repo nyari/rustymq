@@ -2,8 +2,10 @@ pub mod message;
 pub mod buffer;
 pub mod socket;
 pub mod transport;
-pub mod util;
 pub mod serializer;
+
+#[allow(dead_code)]
+pub mod util;
 
 pub use self::message::MessageMetadata;
 pub use self::message::Message;

@@ -1,5 +1,6 @@
 use core::message::{PeerId, Message, RawMessage, MessageMetadata};
 use core::util;
+use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag};
 use stream;
@@ -9,10 +10,21 @@ use std::net;
 use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
-const THREAD_WAIT_TIME_MS: u64 = 0;
+const THREAD_WAIT_TIME_MS_LOW: u64 = 0;
+const THREAD_WAIT_TIME_MS_HIGH: u64 = 500;
+const THREAD_WAIT_TIME_MS_STEPS: u16 = 20;
+const THREAD_WAIT_TIME_MS_DEBOOUNCE: usize = 1000000;
 const SOCKET_TIMEOUT_MS: u64 = 16;
+
+fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
+    DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
+        Duration::from_millis(THREAD_WAIT_TIME_MS_LOW),
+        Duration::from_millis(THREAD_WAIT_TIME_MS_HIGH),
+        THREAD_WAIT_TIME_MS_STEPS), THREAD_WAIT_TIME_MS_DEBOOUNCE)
+}
 
 struct TCPConnectionStream {
     stream: net::TcpStream,
@@ -140,7 +152,7 @@ impl TCPConnectionStreamHandle {
     }
 
     fn wait_for_message(&self, metadata: MessageMetadata) {
-        util::thread::wait_for_success(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
+        util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
             let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
             if prio_sent_messages.contains(&metadata) {
                 prio_sent_messages.remove(&metadata);
@@ -163,7 +175,7 @@ impl TCPConnectionStreamHandle {
     }
 
     pub fn receive(&self) -> Result<RawMessage, SocketError> {
-        Ok(util::thread::wait_for_success(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
+        Ok(util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
             self.receive_async()
         }))
     }
@@ -229,18 +241,21 @@ impl TCPConnectionWorker {
     }
 
     pub fn main_loop(mut self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), SocketError> {
+        let mut sleep_backoff = query_thread_default_duration_backoff();
         loop {
             loop {
                 let receiving = self.process_receiving()?;
                 let sending = self.process_sending()?;
                 if receiving.is_free() && sending.is_free() {
                     break;
+                } else {
+                    sleep_backoff.reset();
                 }
             }
             if *stop_semaphore.lock().unwrap() {
                 return Ok(());
             }
-            std::thread::sleep(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS));
+            std::thread::sleep(sleep_backoff.step());
         }
     }
 }
@@ -437,7 +452,7 @@ impl Transport for TCPConnectionManager {
                 if let Some(message) = self.inward_queue.pop_front() {
                     Ok(message)
                 } else {
-                    Ok(util::thread::wait_for_success_mut(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
+                    Ok(util::thread::wait_for_backoff_mut(query_thread_default_duration_backoff(), || {
                         self.receive_from_all_connections();
                         self.inward_queue.pop_front()
                     }))
@@ -505,12 +520,14 @@ impl TCPConnectionListener {
 
     pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
         self.listener.set_nonblocking(true).unwrap();
-        loop {
+        let mut sleep_backoff = query_thread_default_duration_backoff();
+        loop { 
             loop {
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
                         manager.inward_connection(incoming).unwrap();
+                        sleep_backoff.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
                                 matches!(err.kind(), std::io::ErrorKind::TimedOut) => {
@@ -524,7 +541,7 @@ impl TCPConnectionListener {
                 break;
             }
 
-            thread::sleep(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS));
+            thread::sleep(sleep_backoff.step());
         };
 
         Ok(())
