@@ -16,7 +16,7 @@ const BUFFER_BATCH_SIZE: usize = 2048;
 const THREAD_WAIT_TIME_MS_LOW: u64 = 0;
 const THREAD_WAIT_TIME_MS_HIGH: u64 = 500;
 const THREAD_WAIT_TIME_MS_STEPS: u16 = 20;
-const THREAD_WAIT_TIME_MS_DEBOOUNCE: usize = 1000000;
+const THREAD_WAIT_TIME_MS_DEBOOUNCE: usize = 500000;
 const SOCKET_TIMEOUT_MS: u64 = 16;
 
 fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {

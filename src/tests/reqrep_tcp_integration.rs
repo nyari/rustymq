@@ -1,11 +1,12 @@
 pub use super::super::*;
 
-use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
+use core::socket::{Socket, SocketError, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket,
+                   QueryTypedError, ReceiveTypedError};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
 use core::message::{TypedMessage, Buffer, Message};
 use std::collections::{HashMap};
-//use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 
 use std::convert::{TryFrom};
 
@@ -63,23 +64,29 @@ fn simple_req_rep_tcp_test() {
 
 #[test]
 fn stress_req_rep_tcp_test() {
-    //TODO Appropiately close thread
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
 
     replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
     requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
 
-    //let stop_semaphore = Arc::new(Mutex::new(false));
-    //let stop_semaphore_clone = stop_semaphore.clone();
+    let stop_semaphore = Arc::new(Mutex::new(false));
+    let stop_semaphore_clone = stop_semaphore.clone();
     let _replier_handle = std::thread::spawn(move || { 
         loop {
-            replier.respond_typed(OpFlag::Default, |rmessage:TypedMessage<TestingStruct>| {
+            match replier.respond_typed(OpFlag::NoWait, |rmessage:TypedMessage<TestingStruct>| {
                 let (metadata, mut payload) = rmessage.into_parts();
                 payload.a *= 2;
                 payload.b *= 7;
                 TypedMessage::new(payload).continue_exchange_metadata(metadata)
-            }).unwrap();
+            }) {
+                Ok(()) | Err(QueryTypedError::Receive(ReceiveTypedError::Socket(SocketError::Timeout))) => {
+                    if *stop_semaphore.lock().unwrap() {
+                        break;
+                    }
+                },
+                _ => panic!("")
+            }
         }
     });
 
@@ -100,6 +107,6 @@ fn stress_req_rep_tcp_test() {
         assert_eq!(original_payload.b * 7, payload.b);
     }
 
-    //*stop_semaphore_clone.lock().unwrap() = true;
-    //_replier_handle.join().unwrap();
+    *stop_semaphore_clone.lock().unwrap() = true;
+    _replier_handle.join().unwrap();
 }
