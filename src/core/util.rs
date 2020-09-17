@@ -95,8 +95,105 @@ impl Serializable for VersionInfo {
     }
 }
 
+pub mod time {
+    use std::time::Duration;
+
+    pub trait DurationBackoff: Clone {
+
+        fn step(&mut self) -> Duration;
+        fn current(&self) -> Duration;
+        fn reset(&mut self) -> Duration;
+    }
+
+    #[derive(Clone)]
+    pub struct LinearDurationBackoff {
+        low: Duration,
+        high: Duration,
+        step: Duration,
+        state: Duration
+    }
+
+    impl LinearDurationBackoff {
+        pub fn new(low: Duration, high: Duration, steps: u16) -> Self {
+            Self {
+                low: low,
+                high: high,
+                step: (high - low) / steps as u32,
+                state: low
+            }
+        }
+    }
+
+    impl DurationBackoff for LinearDurationBackoff {
+        #[inline]
+        fn step(&mut self) -> Duration {
+            let result = self.state;
+            if self.state < self.high {
+                self.state += self.step
+            }
+            result
+        }
+
+        #[inline]
+        fn current(&self) -> Duration {
+            self.state
+        }
+
+        #[inline]
+        fn reset(&mut self) -> Duration {
+            self.state = self.low;
+            self.state
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct DurationBackoffWithDebounce<T: DurationBackoff> {
+        backoff: T,
+        debounce: usize,
+        state: usize
+    }
+
+    impl<T: DurationBackoff> DurationBackoffWithDebounce<T> {
+        pub fn new(backoff: T, debounce: usize) -> Self {
+            Self {
+                backoff: backoff,
+                debounce: debounce,
+                state: 0
+            }
+        }
+    }
+
+    impl<T: DurationBackoff> DurationBackoff for DurationBackoffWithDebounce<T> {
+        #[inline]
+        fn step(&mut self) -> Duration {
+            if self.state < self.debounce {
+                self.state += 1;
+                Duration::new(0, 0)
+            } else {
+                self.backoff.step()
+            }
+        }
+
+        #[inline]
+        fn current(&self) -> Duration {
+            if self.state < self.debounce {
+                Duration::new(0, 0)
+            } else {
+                self.backoff.current()
+            }
+        }
+
+        #[inline]
+        fn reset(&mut self) -> Duration {
+            self.state = 0;
+            self.backoff.reset();
+            Duration::new(0, 0)
+        }
+    }
+}
+
 pub mod thread {
-    pub fn wait_for_success<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
+    pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
@@ -105,7 +202,7 @@ pub mod thread {
         }
     }
 
-    pub fn wait_for_success_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
+    pub fn wait_for_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
@@ -113,4 +210,26 @@ pub mod thread {
             std::thread::sleep(sleep_time)
         }
     }
+
+    pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(mut backoff: B, operation: F) -> T {
+        loop {
+            if let Some(result) = operation() {
+                return result
+            }
+            std::thread::sleep(backoff.step())
+        }
+    }
+
+    pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(mut backoff: B, mut operation: F) -> T {
+        loop {
+            if let Some(result) = operation() {
+                return result
+            }
+            std::thread::sleep(backoff.step())
+        }
+    }
+
+    
+
+    
 }
