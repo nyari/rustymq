@@ -1,5 +1,6 @@
 use core::message::{PeerId, Message, RawMessage, MessageMetadata};
 use core::util;
+use core::util::thread::{StoppedSemaphore};
 use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag};
@@ -238,7 +239,7 @@ impl TCPConnectionWorker {
         }
     }
 
-    pub fn main_loop(mut self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), SocketError> {
+    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketError> {
         let mut sleep_backoff = query_thread_default_duration_backoff();
         loop {
             loop {
@@ -250,7 +251,7 @@ impl TCPConnectionWorker {
                     sleep_backoff.reset();
                 }
             }
-            if *stop_semaphore.lock().unwrap() {
+            if stop_semaphore.is_stopped() {
                 return Ok(());
             }
             std::thread::sleep(sleep_backoff.step());
@@ -262,17 +263,17 @@ struct TCPConnection {
     handle: TCPConnectionStreamHandle,
     addr: SocketAddr,
     worker_thread: Option<std::thread::JoinHandle<Result<(), SocketError>>>,
-    stop_semaphore: Arc<Mutex<bool>>
+    stop_semaphore: StoppedSemaphore
 }
 
 impl TCPConnection {
     fn construct_from_worker_handle((worker, handle): (TCPConnectionWorker, TCPConnectionStreamHandle), addr: SocketAddr) -> Result<Self, SocketError> {
-        let stop_semaphore = Arc::new(Mutex::new(false));
+        let stop_semaphore = StoppedSemaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
             addr: addr,
-            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore) } )),
+            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } )),
             stop_semaphore: stop_semaphore_clone
         })
     }
@@ -310,10 +311,7 @@ impl TCPConnection {
 impl Drop for TCPConnection {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        {
-            let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
-            *stop_semaphore = true;
-        }
+        self.stop_semaphore.stop();
         self.worker_thread.take().unwrap().join().unwrap();
     }
 }
@@ -516,7 +514,7 @@ impl TCPConnectionListener {
         })
     }
 
-    pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
+    pub fn main_loop(self, stop_semaphore: StoppedSemaphore) -> Result<(), ConnectorError> {
         self.listener.set_nonblocking(true).unwrap();
         let mut sleep_backoff = query_acceptor_thread_default_duration_backoff();
         loop { 
@@ -535,7 +533,7 @@ impl TCPConnectionListener {
                 };
             }.unwrap();
 
-            if *stop_semaphore.lock().unwrap() {
+            if stop_semaphore.is_stopped() {
                 break;
             }
 
@@ -549,16 +547,16 @@ impl TCPConnectionListener {
 pub struct TCPAcceptorTransport {
     manager: TCPConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
-    stop_semaphore: Arc<Mutex<bool>>
+    stop_semaphore: StoppedSemaphore
 }
 
 impl TCPAcceptorTransport {
     pub fn new() -> Self {
-        let stop_semaphore = Arc::new(Mutex::new(false));
+        let stop_semaphore = StoppedSemaphore::new();
         Self {
             manager: TCPConnectionManager::new(),
             listener_thread: None,
-            stop_semaphore
+            stop_semaphore: stop_semaphore
         }
     }
 }
@@ -593,10 +591,7 @@ impl AcceptorTransport for TCPAcceptorTransport {
 impl Drop for TCPAcceptorTransport {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        {
-            let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
-            *stop_semaphore = true;
-        }
+        self.stop_semaphore.stop();
         self.listener_thread.take().unwrap().join().unwrap();
     }
 }

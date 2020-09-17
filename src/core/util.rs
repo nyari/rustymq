@@ -193,6 +193,8 @@ pub mod time {
 }
 
 pub mod thread {
+    use std::sync::{Arc, Mutex};
+
     pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
@@ -229,7 +231,36 @@ pub mod thread {
         }
     }
 
-    
+    #[derive(Clone)]
+    pub struct StoppedSemaphore {
+        semaphore: Arc<Mutex<bool>>
+    }
 
-    
+    impl StoppedSemaphore {
+        pub fn new() -> Self {
+            Self {
+                semaphore: Arc::new(Mutex::new(false))
+            }
+        }
+
+        pub fn is_stopped(&self) -> bool {
+            if let Ok(value) = self.semaphore.lock() {
+                *value
+            } else {
+                true
+            }
+        }
+
+        pub fn stop(&self) {
+            if let Ok(mut value) = self.semaphore.lock() {
+                *value = true
+            }
+        }
+    }
+
+    impl Drop for StoppedSemaphore {
+        fn drop(&mut self) {
+            self.stop()
+        }
+    }
 }
