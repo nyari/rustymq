@@ -68,7 +68,6 @@ impl RawMessageWriter {
             Ok(processed_amount) => {
                 self.progress_amount(processed_amount);
                 if self.is_empty() {
-                    writer.flush()?;
                     Err(State::Empty)
                 } else {
                     Ok(())

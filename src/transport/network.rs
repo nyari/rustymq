@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::convert::{From};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
-const WAIT_TIME_MS: u64 = 8;
+const THREAD_WAIT_TIME_MS: u64 = 0;
+const SOCKET_TIMEOUT_MS: u64 = 16;
 
 struct TCPConnectionStream {
     stream: net::TcpStream,
@@ -28,10 +29,9 @@ struct TCPConnectionStream {
 impl TCPConnectionStream {
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
-        stream.set_nodelay(true)?;
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -45,10 +45,9 @@ impl TCPConnectionStream {
     }
 
     pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
-        stream.set_nodelay(true)?;
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(WAIT_TIME_MS)))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_TIMEOUT_MS)))?;
         Ok(Self {
             stream: stream,
 //            addr: addr,
@@ -142,7 +141,7 @@ impl TCPConnectionStreamHandle {
     }
 
     fn wait_for_message(&self, metadata: MessageMetadata) {
-        util::thread::wait_for_success(std::time::Duration::from_millis(WAIT_TIME_MS), || {
+        util::thread::wait_for_success(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
             let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
             if prio_sent_messages.contains(&metadata) {
                 prio_sent_messages.remove(&metadata);
@@ -165,7 +164,7 @@ impl TCPConnectionStreamHandle {
     }
 
     pub fn receive(&self) -> Result<RawMessage, SocketError> {
-        Ok(util::thread::wait_for_success(std::time::Duration::from_millis(WAIT_TIME_MS), || {
+        Ok(util::thread::wait_for_success(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
             self.receive_async()
         }))
     }
@@ -242,7 +241,7 @@ impl TCPConnectionWorker {
             if *stop_semaphore.lock().unwrap() {
                 return Ok(());
             }
-            std::thread::sleep(std::time::Duration::from_millis(WAIT_TIME_MS));
+            std::thread::sleep(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS));
         }
     }
 }
@@ -439,7 +438,7 @@ impl Transport for TCPConnectionManager {
                 if let Some(message) = self.inward_queue.pop_front() {
                     Ok(message)
                 } else {
-                    Ok(util::thread::wait_for_success_mut(std::time::Duration::from_millis(WAIT_TIME_MS), || {
+                    Ok(util::thread::wait_for_success_mut(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS), || {
                         self.receive_from_all_connections();
                         self.inward_queue.pop_front()
                     }))
@@ -526,7 +525,7 @@ impl TCPConnectionListener {
                 break;
             }
 
-            thread::sleep(std::time::Duration::from_millis(WAIT_TIME_MS));
+            thread::sleep(std::time::Duration::from_millis(THREAD_WAIT_TIME_MS));
         };
 
         Ok(())
