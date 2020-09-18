@@ -375,8 +375,10 @@ impl TCPConnectionManagerPeers {
                     results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }))
                 },
                 (messages, Some(err)) => {
-                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }));
-                    results.push(Err((self.get_peer_id_for_address(connection.get_address()), err)))
+                    if !messages.is_empty() {
+                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }));
+                        results.push(Err((self.get_peer_id_for_address(connection.get_address()), err)))
+                    }
                 }
             }
         });
