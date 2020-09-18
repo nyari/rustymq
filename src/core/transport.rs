@@ -11,7 +11,7 @@ pub enum TransportMethod
 
 pub trait Transport: Send + Sync {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError>;
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError>;
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
     fn close(self) -> Result<(), SocketError>;
 }
 

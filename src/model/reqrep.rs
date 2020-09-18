@@ -120,10 +120,10 @@ impl<T> Socket for RequestSocket<T>
 impl<T> InwardSocket for RequestSocket<T>
     where T: InitiatorTransport {
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         match self.channel.receive(flags) {
             Ok(message) => {
-                self.tracker.close_conversation(message)
+                self.tracker.close_conversation(message).map_err(|error| {(None, error)})
             }
             Err(err) => Err(err)
         }
@@ -182,10 +182,10 @@ impl<T> Socket for ReplySocket<T>
 impl<T> InwardSocket for ReplySocket<T>
     where T: AcceptorTransport {
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         let message = self.channel.receive(flags)?;
         self.tracker.accept_peer(message.peer_id().unwrap().clone());
-        self.tracker.initiate_new_conversation(message)
+        self.tracker.initiate_new_conversation(message).map_err(|error| {(None, error)})
     }
 }
 
