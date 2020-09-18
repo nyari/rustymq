@@ -50,7 +50,7 @@ pub enum SendTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as T
 
 #[derive(Debug)]
 pub enum ReceiveTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <Buffer as TryInto<T>>::Error : std::fmt::Debug {
-    Socket(SocketError),
+    Socket((Option<PeerId>, SocketError)),
     Conversion(<TypedMessage<T> as TryFrom<RawMessage>>::Error)
 }
 
@@ -89,7 +89,7 @@ pub trait OutwardSocket : Socket {
 }
 
 pub trait InwardSocket : Socket {
-    fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, SocketError>;
+    fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
 
     fn receive_typed<T>(&mut self, flags:OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>>
         where T:TryInto<Buffer> + TryFrom<Buffer>,
@@ -107,8 +107,8 @@ pub trait InwardSocket : Socket {
 
 pub trait BidirectionalSocket: OutwardSocket + InwardSocket
 {
-    fn query(&mut self, message :RawMessage, flags:OpFlag) -> Result<RawMessage, SocketError> {
-        self.send(message, flags.clone())?;
+    fn query(&mut self, message :RawMessage, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+        self.send(message, flags.clone()).map_err(|error| {(None, error)})?;
         self.receive(flags)
     }
 
@@ -126,11 +126,11 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         }
     }
 
-    fn respond<T: Fn(RawMessage) -> RawMessage> (&mut self, flags:OpFlag, processor: T) -> Result<(), SocketError> {
+    fn respond<T: Fn(RawMessage) -> RawMessage> (&mut self, flags:OpFlag, processor: T) -> Result<(), (Option<PeerId>, SocketError)> {
         let query = self.receive(flags.clone())?;
         let query_metadata = query.metadata().clone();
         let response = processor(query).continue_exchange_metadata(query_metadata);
-        self.send(response, flags)?;
+        self.send(response, flags).map_err(|error| {(None, error)})?;
         Ok(())
     }
 

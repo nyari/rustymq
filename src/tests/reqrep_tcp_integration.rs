@@ -80,7 +80,7 @@ fn stress_simple_req_rep_tcp_test() {
                 payload.b *= 7;
                 TypedMessage::new(payload).continue_exchange_metadata(metadata)
             }) {
-                Ok(()) | Err(QueryTypedError::Receive(ReceiveTypedError::Socket(SocketError::Timeout))) => {
+                Ok(()) | Err(QueryTypedError::Receive(ReceiveTypedError::Socket((None, SocketError::Timeout)))) => {
                     if *stop_semaphore.lock().unwrap() {
                         break;
                     }

@@ -1,5 +1,6 @@
 use core::message::{PeerId, Message, RawMessage, MessageMetadata};
 use core::util;
+use core::util::thread::{StoppedSemaphore};
 use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag};
@@ -11,6 +12,7 @@ use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
+use std::cell::{RefCell};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
@@ -58,7 +60,7 @@ impl TCPConnectionStream {
         })
     }
 
-    pub fn inward_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
+    pub fn accept_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
@@ -117,9 +119,9 @@ impl TCPConnectionStream {
     pub fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         let messages = self.reader.read_into(&mut self.stream)?;
         let mut inward_queue = self.inward_queue.lock().unwrap();
-        for message in messages.into_iter() {
+        messages.into_iter().for_each(|message| {
             inward_queue.push_back(message);
-        }
+        });
         Ok(())
     }
 }
@@ -149,33 +151,19 @@ impl TCPConnectionStreamHandle {
         outward_queue.push_back(message)
     }
 
-    fn add_to_prio_outward_queue(&self, message: RawMessage) {
+    pub fn add_to_prio_outward_queue(&self, message: RawMessage) {
         let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
         prio_outward_queue.push_back(message)
     }
 
-    fn wait_for_message(&self, metadata: MessageMetadata) {
-        util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
-            let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-            prio_sent_messages.take(&metadata).map(|_| {()})
-        })
+    pub fn check_prio_message_sent(&self, metadata: &MessageMetadata) -> bool {
+        let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
+        prio_sent_messages.take(metadata).is_some()
     }
 
-    pub fn send_now(&self, message: RawMessage) {
-        let metadata = message.metadata().clone();
-        self.add_to_prio_outward_queue(message);
-        self.wait_for_message(metadata)
-    }
-
-    pub fn receive_async(&self) -> Option<RawMessage> {
+    pub fn receive_async_all(&self) -> Vec<RawMessage> {
         let mut inward_queue = self.inward_queue.lock().unwrap();
-        inward_queue.pop_front()
-    }
-
-    pub fn receive(&self) -> Result<RawMessage, SocketError> {
-        Ok(util::thread::wait_for_backoff(query_acceptor_thread_default_duration_backoff(), || {
-            self.receive_async()
-        }))
+        inward_queue.drain(..).collect()
     }
 }
 
@@ -208,8 +196,8 @@ impl TCPConnectionWorker {
         Self::construct_from_stream(TCPConnectionStream::connect(addr)?)
     }
 
-    pub fn inward_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
-        Self::construct_from_stream(TCPConnectionStream::inward_connection((stream, addr))?)
+    pub fn accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
+        Self::construct_from_stream(TCPConnectionStream::accept_connection((stream, addr))?)
     }
 
     fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
@@ -238,7 +226,7 @@ impl TCPConnectionWorker {
         }
     }
 
-    pub fn main_loop(mut self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), SocketError> {
+    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketError> {
         let mut sleep_backoff = query_thread_default_duration_backoff();
         loop {
             loop {
@@ -250,7 +238,7 @@ impl TCPConnectionWorker {
                     sleep_backoff.reset();
                 }
             }
-            if *stop_semaphore.lock().unwrap() {
+            if stop_semaphore.is_stopped() {
                 return Ok(());
             }
             std::thread::sleep(sleep_backoff.step());
@@ -261,45 +249,69 @@ impl TCPConnectionWorker {
 struct TCPConnection {
     handle: TCPConnectionStreamHandle,
     addr: SocketAddr,
-    worker_thread: Option<std::thread::JoinHandle<Result<(), SocketError>>>,
-    stop_semaphore: Arc<Mutex<bool>>
+    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketError>>>>,
+    stop_semaphore: StoppedSemaphore
 }
 
 impl TCPConnection {
     fn construct_from_worker_handle((worker, handle): (TCPConnectionWorker, TCPConnectionStreamHandle), addr: SocketAddr) -> Result<Self, SocketError> {
-        let stop_semaphore = Arc::new(Mutex::new(false));
+        let stop_semaphore = StoppedSemaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
             addr: addr,
-            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore) } )),
+            worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
             stop_semaphore: stop_semaphore_clone
         })
+    }
+
+    fn check_worker_state(&self) -> Result<(), SocketError> {
+        if self.stop_semaphore.is_stopped() {
+            match self.worker_thread.borrow_mut().take().unwrap().join() {
+                Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
+                Ok(error) => error,
+                Err(_) => Err(SocketError::InternalError)
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
         Self::construct_from_worker_handle(TCPConnectionWorker::connect(addr)?, addr)
     }
 
-    pub fn inward_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
-        Self::construct_from_worker_handle(TCPConnectionWorker::inward_connection((stream, addr))?, addr)
+    pub fn accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
+        Self::construct_from_worker_handle(TCPConnectionWorker::accept_connection((stream, addr))?, addr)
     }
 
-    pub fn send_async(&self, message: RawMessage) {
-        self.handle.add_to_outward_queue(message)
+    pub fn send_async(&self, message: RawMessage) -> Result<(), SocketError> {
+        self.check_worker_state()?;
+        self.handle.add_to_outward_queue(message);
+        Ok(())
     }
 
-    pub fn send(&self, message: RawMessage) {
-        self.handle.send_now(message);
+    pub fn send(&self, message: RawMessage) -> Result<(), SocketError> {
+        self.check_worker_state()?;
+        let metadata = message.metadata().clone();
+        self.handle.add_to_prio_outward_queue(message);
+        util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
+            if let Err(err) = self.check_worker_state() {
+                Some(Err(err))
+            } else if self.handle.check_prio_message_sent(&metadata) {
+                Some(Ok(()))
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn receive_async(&self) -> Option<RawMessage> {
-        self.handle.receive_async()
-    }
-
-    #[allow(dead_code)]
-    pub fn receive(&self) -> Result<RawMessage, SocketError> {
-        self.handle.receive()
+    pub fn receive_async_all(&self) -> (Vec<RawMessage>, Option<SocketError>) {
+        let messages = self.handle.receive_async_all();
+        match self.check_worker_state() {
+            Ok(()) => (messages, None),
+            Err(err) => (messages, Some(err))
+        }
     }
 
     pub fn get_address(&self) -> SocketAddr {
@@ -310,11 +322,11 @@ impl TCPConnection {
 impl Drop for TCPConnection {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        {
-            let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
-            *stop_semaphore = true;
+        self.stop_semaphore.stop();
+        match self.worker_thread.borrow_mut().take() {
+            Some(join_handle) => { join_handle.join(); },
+            None => ()
         }
-        self.worker_thread.take().unwrap().join().unwrap();
     }
 }
 
@@ -339,8 +351,8 @@ impl TCPConnectionManagerPeers {
         }
     }
 
-    pub fn inward_connection(&mut self, (stream, addr): (net::TcpStream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match TCPConnection::inward_connection((stream, addr)) {
+    pub fn accept_connection(&mut self, (stream, addr): (net::TcpStream, SocketAddr)) -> Result<PeerId, ConnectorError> {
+        match TCPConnection::accept_connection((stream, addr)) {
             Ok(connection) => self.commit_onnection(connection),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
@@ -349,10 +361,28 @@ impl TCPConnectionManagerPeers {
     pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         let connection = self.get_message_peer_connection(message.peer_id())?;
         match flags {
-            OpFlag::Default => {connection.send(message); Ok(())},
-            OpFlag::NoWait => Ok(connection.send_async(message)),
+            OpFlag::Default => connection.send(message),
+            OpFlag::NoWait => connection.send_async(message),
             opflag => Err(SocketError::UnsupportedOpFlag(opflag))
         }
+    }
+
+    pub fn receive_from_all_connections(&self) -> Vec<Result<RawMessage, (PeerId, SocketError)>> {
+        let mut results = Vec::new();
+        self.peers.values().for_each(|connection| {
+            match connection.receive_async_all() {
+                (messages, None) => {
+                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }))
+                },
+                (messages, Some(err)) => {
+                    if !messages.is_empty() {
+                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }));
+                        results.push(Err((self.get_peer_id_for_address(connection.get_address()), err)))
+                    }
+                }
+            }
+        });
+        results
     }
 
     fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a TCPConnection, SocketError> {
@@ -376,18 +406,12 @@ impl TCPConnectionManagerPeers {
         }
     }
 
-    pub fn transform_received_message(&self, message: RawMessage, address: SocketAddr) -> RawMessage {
-        message.apply_peer_id(self.addresses.get(&address).unwrap().clone())
+    fn get_peer_id_for_address(&self, address: SocketAddr) -> PeerId {
+        self.addresses.get(&address).unwrap().clone()
     }
 
-    fn receive_from_all_connections(&self) -> Vec<RawMessage> {
-        let mut results = Vec::new();
-        self.peers.values().for_each(|connection| {
-            while let Some(message) = connection.receive_async() {
-                results.push(self.transform_received_message(message, connection.get_address()))
-            }
-        });
-        results
+    fn set_peer_id_on_received_message(&self, message: RawMessage, address: SocketAddr) -> RawMessage {
+        message.apply_peer_id(self.get_peer_id_for_address(address))
     }
 
     fn commit_onnection(&mut self, connection: TCPConnection) -> Result<PeerId, ConnectorError> {
@@ -407,7 +431,7 @@ impl TCPConnectionManagerPeers {
 
 struct TCPConnectionManager {
     peers: Arc<Mutex<TCPConnectionManagerPeers>>,
-    inward_queue: VecDeque<RawMessage>
+    inward_queue: VecDeque<Result<RawMessage, (PeerId, SocketError)>>
 }
 
 impl TCPConnectionManager {
@@ -443,23 +467,27 @@ impl Transport for TCPConnectionManager {
         self.send_message(message, flags)
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.receive_from_all_connections();
+        let inward_entry_mapper = |inward_entry: Result<RawMessage, (PeerId, SocketError)>| {
+            inward_entry.map_err(|(peer_id, error)| {(Some(peer_id), error)})
+        };
+
         match flags {
             OpFlag::Default => {
-                if let Some(message) = self.inward_queue.pop_front() {
-                    Ok(message)
+                if let Some(inward_entry) = self.inward_queue.pop_front() {
+                    inward_entry_mapper(inward_entry)
                 } else {
-                    Ok(util::thread::wait_for_backoff_mut(query_thread_default_duration_backoff(), || {
+                    util::thread::wait_for_backoff_mut(query_thread_default_duration_backoff(), || {
                         self.receive_from_all_connections();
-                        self.inward_queue.pop_front()
-                    }))
+                        self.inward_queue.pop_front().map(inward_entry_mapper)
+                    })
                 }
             }
             OpFlag::NoWait => {
-                self.inward_queue.pop_front().ok_or(SocketError::Timeout)
+                self.inward_queue.pop_front().map_or(Err((None, SocketError::Timeout)), inward_entry_mapper)
             },
-            opflag => Err(SocketError::UnsupportedOpFlag(opflag))
+            opflag => Err((None, (SocketError::UnsupportedOpFlag(opflag))))
         }
     }
 
@@ -485,7 +513,7 @@ impl Transport for TCPInitiatorTransport {
         self.manager.send(message, flags)
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.manager.receive(flags)
     }
 
@@ -516,7 +544,7 @@ impl TCPConnectionListener {
         })
     }
 
-    pub fn main_loop(self, stop_semaphore: Arc<Mutex<bool>>) -> Result<(), ConnectorError> {
+    pub fn main_loop(self, stop_semaphore: StoppedSemaphore) -> Result<(), ConnectorError> {
         self.listener.set_nonblocking(true).unwrap();
         let mut sleep_backoff = query_acceptor_thread_default_duration_backoff();
         loop { 
@@ -524,7 +552,7 @@ impl TCPConnectionListener {
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
-                        manager.inward_connection(incoming).unwrap();
+                        manager.accept_connection(incoming).unwrap();
                         sleep_backoff.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
@@ -535,7 +563,7 @@ impl TCPConnectionListener {
                 };
             }.unwrap();
 
-            if *stop_semaphore.lock().unwrap() {
+            if stop_semaphore.is_stopped() {
                 break;
             }
 
@@ -549,16 +577,16 @@ impl TCPConnectionListener {
 pub struct TCPAcceptorTransport {
     manager: TCPConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
-    stop_semaphore: Arc<Mutex<bool>>
+    stop_semaphore: StoppedSemaphore
 }
 
 impl TCPAcceptorTransport {
     pub fn new() -> Self {
-        let stop_semaphore = Arc::new(Mutex::new(false));
+        let stop_semaphore = StoppedSemaphore::new();
         Self {
             manager: TCPConnectionManager::new(),
             listener_thread: None,
-            stop_semaphore
+            stop_semaphore: stop_semaphore
         }
     }
 }
@@ -568,7 +596,7 @@ impl Transport for TCPAcceptorTransport {
         self.manager.send(message, flags)
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, SocketError> {
+    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.manager.receive(flags)
     }
 
@@ -593,10 +621,7 @@ impl AcceptorTransport for TCPAcceptorTransport {
 impl Drop for TCPAcceptorTransport {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        {
-            let mut stop_semaphore = self.stop_semaphore.lock().unwrap();
-            *stop_semaphore = true;
-        }
+        self.stop_semaphore.stop();
         self.listener_thread.take().unwrap().join().unwrap();
     }
 }
