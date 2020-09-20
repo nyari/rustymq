@@ -13,6 +13,7 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
 use std::cell::{RefCell};
+use std::io;
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
@@ -31,8 +32,50 @@ fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDeboun
         10), 100)
 }
 
-struct TCPConnectionStream {
-    stream: net::TcpStream,
+struct ReadWriteStreamConnectionHandle {
+    outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
+    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
+    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
+    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
+}
+
+impl ReadWriteStreamConnectionHandle {
+    pub fn new(outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
+               prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
+               prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
+               inward_queue: Arc<Mutex<VecDeque<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
+        Self {
+            outward_queue: outward_queue,
+            prio_outward_queue: prio_outward_queue,
+            prio_sent_messages: prio_sent_messages,
+            inward_queue: inward_queue
+        }
+    }
+
+    pub fn add_to_outward_queue(&self, message: RawMessage) {
+        let mut outward_queue = self.outward_queue.lock().unwrap();
+        outward_queue.push_back(message)
+    }
+
+    pub fn add_to_prio_outward_queue(&self, message: RawMessage) {
+        let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
+        prio_outward_queue.push_back(message)
+    }
+
+    pub fn check_prio_message_sent(&self, metadata: &MessageMetadata) -> bool {
+        let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
+        prio_sent_messages.take(metadata).is_some()
+    }
+
+    pub fn receive_async_all(&self) -> Vec<RawMessage> {
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        inward_queue.drain(..).collect()
+    }
+}
+
+
+struct ReadWriteStreamConnection<S: io::Read + io::Write> {
+    stream: S,
 //    addr: SocketAddr,
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
@@ -42,45 +85,24 @@ struct TCPConnectionStream {
     inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
 }
 
-impl TCPConnectionStream {
-    pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
-        let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(Self {
+impl<S: io::Read + io::Write> ReadWriteStreamConnection<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
             stream: stream,
-//            addr: addr,
             reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
             writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             inward_queue: Arc::new(Mutex::new(VecDeque::new()))
-        })
+        }
     }
 
-    pub fn accept_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(Self {
-            stream: stream,
-//            addr: addr,
-            reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
-            writer: stream::RawMessageWriter::new_empty(),
-            prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
-            outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            inward_queue: Arc::new(Mutex::new(VecDeque::new()))
-        })
-    }
-
-    pub fn get_handle(&self) -> TCPConnectionStreamHandle {
-        TCPConnectionStreamHandle::new(self.outward_queue.clone(),
-                                       self.prio_outward_queue.clone(),
-                                       self.prio_sent_messages.clone(),
-                                       self.inward_queue.clone())
+    pub fn get_handle(&self) -> ReadWriteStreamConnectionHandle {
+        ReadWriteStreamConnectionHandle::new(self.outward_queue.clone(),
+                                             self.prio_outward_queue.clone(),
+                                             self.prio_sent_messages.clone(),
+                                             self.inward_queue.clone())
     }
 
     fn get_outward_message_from_prio_queue(&mut self) -> Option<RawMessage> {
@@ -126,65 +148,24 @@ impl TCPConnectionStream {
     }
 }
 
-struct TCPConnectionStreamHandle {
-    outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
-    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
-}
-
-impl TCPConnectionStreamHandle {
-    pub fn new(outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
-               inward_queue: Arc<Mutex<VecDeque<RawMessage>>>) -> TCPConnectionStreamHandle {
-        Self {
-            outward_queue: outward_queue,
-            prio_outward_queue: prio_outward_queue,
-            prio_sent_messages: prio_sent_messages,
-            inward_queue: inward_queue
-        }
-    }
-
-    pub fn add_to_outward_queue(&self, message: RawMessage) {
-        let mut outward_queue = self.outward_queue.lock().unwrap();
-        outward_queue.push_back(message)
-    }
-
-    pub fn add_to_prio_outward_queue(&self, message: RawMessage) {
-        let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
-        prio_outward_queue.push_back(message)
-    }
-
-    pub fn check_prio_message_sent(&self, metadata: &MessageMetadata) -> bool {
-        let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-        prio_sent_messages.take(metadata).is_some()
-    }
-
-    pub fn receive_async_all(&self) -> Vec<RawMessage> {
-        let mut inward_queue = self.inward_queue.lock().unwrap();
-        inward_queue.drain(..).collect()
-    }
-}
-
 #[derive(Debug)]
-enum TCPConnectionWorkerState {
+enum ReadWriteSteramConnectionWorkerState {
     Busy,
     Free
 }
 
-impl TCPConnectionWorkerState {
+impl ReadWriteSteramConnectionWorkerState {
     pub fn is_free(&self) -> bool {
-        matches!(self, TCPConnectionWorkerState::Free)
+        matches!(self, ReadWriteSteramConnectionWorkerState::Free)
     }
 }
 
-struct TCPConnectionWorker {
-    stream: TCPConnectionStream,
+struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write> {
+    stream: ReadWriteStreamConnection<S>
 }
 
-impl TCPConnectionWorker {
-    fn construct_from_stream(stream: TCPConnectionStream) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
+impl<S: io::Read + io::Write> ReadWriteStreamConnectionWorker<S> {
+    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<(Self, ReadWriteStreamConnectionHandle), SocketError> {
         let worker = Self {
             stream: stream
         };
@@ -192,33 +173,25 @@ impl TCPConnectionWorker {
         Ok((worker, handle))
     }
 
-    pub fn connect(addr: SocketAddr) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
-        Self::construct_from_stream(TCPConnectionStream::connect(addr)?)
-    }
-
-    pub fn accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<(Self, TCPConnectionStreamHandle), SocketError> {
-        Self::construct_from_stream(TCPConnectionStream::accept_connection((stream, addr))?)
-    }
-
-    fn process_receiving(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
+    fn process_receiving(&mut self) -> Result<ReadWriteSteramConnectionWorkerState, SocketError> {
         match self.stream.proceed_receiving() {
-            Ok(()) => Ok(TCPConnectionWorkerState::Busy),
-            Err(stream::State::Remainder) => Ok(TCPConnectionWorkerState::Busy),
+            Ok(()) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
+            Err(stream::State::Remainder) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
             Err(stream::State::Empty) => {
-                Ok(TCPConnectionWorkerState::Free)
+                Ok(ReadWriteSteramConnectionWorkerState::Free)
             }
             Err(stream::State::Stream(err)) => Err(err)
         }
     }
 
-    fn process_sending(&mut self) -> Result<TCPConnectionWorkerState, SocketError> {
+    fn process_sending(&mut self) -> Result<ReadWriteSteramConnectionWorkerState, SocketError> {
         match self.stream.proceed_sending() {
-            Ok(()) => Ok(TCPConnectionWorkerState::Busy),
+            Ok(()) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
             Err(stream::State::Empty) => {
                 if let Err(stream::State::Empty) = self.stream.start_next_message() {
-                    Ok(TCPConnectionWorkerState::Free)
+                    Ok(ReadWriteSteramConnectionWorkerState::Free)
                 } else {
-                    Ok(TCPConnectionWorkerState::Busy)
+                    Ok(ReadWriteSteramConnectionWorkerState::Busy)
                 }
             }
             Err(stream::State::Stream(err)) => Err(err),
@@ -246,20 +219,19 @@ impl TCPConnectionWorker {
     }
 }
 
-struct TCPConnection {
-    handle: TCPConnectionStreamHandle,
-    addr: SocketAddr,
+struct ReadWriteStreamConnectionManager {
+    handle: ReadWriteStreamConnectionHandle,
     worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketError>>>>,
     stop_semaphore: StoppedSemaphore
 }
 
-impl TCPConnection {
-    fn construct_from_worker_handle((worker, handle): (TCPConnectionWorker, TCPConnectionStreamHandle), addr: SocketAddr) -> Result<Self, SocketError> {
+impl ReadWriteStreamConnectionManager {
+    fn construct_from_worker_handle<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketError> {
+        let (worker, handle) = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = StoppedSemaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
-            addr: addr,
             worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
             stop_semaphore: stop_semaphore_clone
         })
@@ -275,14 +247,6 @@ impl TCPConnection {
         } else {
             Ok(())
         }
-    }
-
-    pub fn connect(addr: SocketAddr) -> Result<Self, SocketError> {
-        Self::construct_from_worker_handle(TCPConnectionWorker::connect(addr)?, addr)
-    }
-
-    pub fn accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<Self, SocketError> {
-        Self::construct_from_worker_handle(TCPConnectionWorker::accept_connection((stream, addr))?, addr)
     }
 
     pub fn send_async(&self, message: RawMessage) -> Result<(), SocketError> {
@@ -313,13 +277,9 @@ impl TCPConnection {
             Err(err) => (messages, Some(err))
         }
     }
-
-    pub fn get_address(&self) -> SocketAddr {
-        self.addr
-    }
 }
 
-impl Drop for TCPConnection {
+impl Drop for ReadWriteStreamConnectionManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
         self.stop_semaphore.stop();
@@ -330,16 +290,46 @@ impl Drop for TCPConnection {
     }
 }
 
+struct TCPStreamConnectionBuilder {}
+
+impl TCPStreamConnectionBuilder {
+    pub fn connect(addr: SocketAddr) -> Result<ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+        let stream = net::TcpStream::connect(addr)?;
+        stream.set_nonblocking(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        Ok(ReadWriteStreamConnection::new(stream))
+    }
+
+    pub fn accept_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+        stream.set_nonblocking(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        Ok(ReadWriteStreamConnection::new(stream))
+    }
+
+    pub fn manager_connect(addr: SocketAddr) -> Result<ReadWriteStreamConnectionManager, SocketError> {
+        ReadWriteStreamConnectionManager::construct_from_worker_handle(TCPStreamConnectionBuilder::connect(addr)?)
+    }
+
+    pub fn manager_accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<ReadWriteStreamConnectionManager, SocketError> {
+        ReadWriteStreamConnectionManager::construct_from_worker_handle(TCPStreamConnectionBuilder::accept_connection((stream, addr))?)
+    }
+
+}
+
 struct TCPConnectionManagerPeers {
-    peers: HashMap<PeerId, TCPConnection>,
+    peer_table: HashMap<PeerId, ReadWriteStreamConnectionManager>,
     addresses: HashMap<SocketAddr, PeerId>,
+    peers: HashMap<PeerId, SocketAddr>
 }
 
 impl TCPConnectionManagerPeers {
     pub fn new() -> Self {
         Self {
-            peers: HashMap::new(),
-            addresses: HashMap::new()
+            peer_table: HashMap::new(),
+            addresses: HashMap::new(),
+            peers: HashMap::new()
         }
     }
 
@@ -352,8 +342,8 @@ impl TCPConnectionManagerPeers {
     }
 
     pub fn accept_connection(&mut self, (stream, addr): (net::TcpStream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match TCPConnection::accept_connection((stream, addr)) {
-            Ok(connection) => self.commit_onnection(connection),
+        match TCPStreamConnectionBuilder::manager_accept_connection((stream, addr)) {
+            Ok(connection) => self.commit_onnection(connection, addr),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
     }
@@ -369,15 +359,15 @@ impl TCPConnectionManagerPeers {
 
     pub fn receive_from_all_connections(&self) -> Vec<Result<RawMessage, (PeerId, SocketError)>> {
         let mut results = Vec::new();
-        self.peers.values().for_each(|connection| {
+        self.peer_table.iter().for_each(|(peer_id, connection)| {
             match connection.receive_async_all() {
                 (messages, None) => {
-                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }))
+                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(peer_id))) }))
                 },
                 (messages, Some(err)) => {
                     if !messages.is_empty() {
-                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, connection.get_address())) }));
-                        results.push(Err((self.get_peer_id_for_address(connection.get_address()), err)))
+                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(peer_id))) }));
+                        results.push(Err((peer_id.clone(), err)))
                     }
                 }
             }
@@ -385,14 +375,14 @@ impl TCPConnectionManagerPeers {
         results
     }
 
-    fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a TCPConnection, SocketError> {
+    fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a ReadWriteStreamConnectionManager, SocketError> {
         match peer_id {
-            Some(peerid) => match self.peers.get(&peerid) {
+            Some(peerid) => match self.peer_table.get(&peerid) {
                 Some(connection) => Ok(connection),
                 None => Err(SocketError::UnknownPeer)
             },
-            None => if self.peers.len() == 1 {
-                Ok(self.peers.values().next().unwrap())
+            None => if self.peer_table.len() == 1 {
+                Ok(self.peer_table.values().next().unwrap())
             } else {
                 Err(SocketError::UnknownPeer)
             }
@@ -400,32 +390,36 @@ impl TCPConnectionManagerPeers {
     }
 
     fn connect_internal(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
-        match TCPConnection::connect(address) {
-            Ok(connection) => self.commit_onnection(connection),
+        match TCPStreamConnectionBuilder::manager_connect(address) {
+            Ok(connection) => self.commit_onnection(connection, address),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
     }
 
-    fn get_peer_id_for_address(&self, address: SocketAddr) -> PeerId {
-        self.addresses.get(&address).unwrap().clone()
+    fn get_peer_id_for_address(&self, address: &SocketAddr) -> PeerId {
+        self.addresses.get(address).unwrap().clone()
     }
 
-    fn set_peer_id_on_received_message(&self, message: RawMessage, address: SocketAddr) -> RawMessage {
+    fn get_address_for_peer_id(&self, peer_id: &PeerId) -> SocketAddr {
+        self.peers.get(peer_id).unwrap().clone()
+    } 
+
+    fn set_peer_id_on_received_message(&self, message: RawMessage, address: &SocketAddr) -> RawMessage {
         message.apply_peer_id(self.get_peer_id_for_address(address))
     }
 
-    fn commit_onnection(&mut self, connection: TCPConnection) -> Result<PeerId, ConnectorError> {
+    fn commit_onnection(&mut self, connection: ReadWriteStreamConnectionManager, addr: SocketAddr) -> Result<PeerId, ConnectorError> {
         let peerid = PeerId::new_random();
-        let addr = connection.get_address();
 
-        self.peers.insert(peerid, connection);
+        self.peer_table.insert(peerid, connection);
         self.addresses.insert(addr, peerid);
+        self.peers.insert(peerid, addr);
 
         Ok(peerid)
     }
 
     fn is_already_connected(&self, address: &SocketAddr) -> bool {
-        self.peers.values().find(|x| x.get_address() == *address).is_some()
+        self.addresses.contains_key(address)
     }
 }
 
