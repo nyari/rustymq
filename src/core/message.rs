@@ -271,6 +271,7 @@ impl Message for RawMessage {
     }
 }
 
+#[derive(Clone)]
 pub struct TypedMessage<T>
     where T: TryInto<Buffer>, Buffer: TryInto<T>
 {

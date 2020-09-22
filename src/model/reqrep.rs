@@ -1,4 +1,4 @@
-use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, ConnectorError, SocketError, OpFlag};
+use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, ConnectorError, SocketError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message};
 
@@ -82,6 +82,11 @@ impl ConnectionTracker {
             None => Err(SocketError::UnknownPeer)
         }
     }
+
+    fn close_connection(&mut self, peer_id: PeerId) -> Result<(), ConnectorError> {
+        self.map.remove(&peer_id).ok_or(ConnectorError::UnknownPeer)?;
+        Ok(())
+    }
 }
 
 pub struct RequestSocket<T: InitiatorTransport> {
@@ -110,6 +115,21 @@ impl<T> Socket for RequestSocket<T>
 
     fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         Err(ConnectorError::NotSupportedOperation)
+    }
+
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+        match peer_identification {
+            PeerIdentification::PeerId(peer_id) => {
+                self.tracker.close_connection(peer_id)?;
+                self.channel.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
+                Ok(())
+            },
+            PeerIdentification::TransportMethod(method) => {
+                let peer_id = (self.channel.close_connection(PeerIdentification::TransportMethod(method))?).unwrap();
+                self.tracker.close_connection(peer_id).expect("onnection existance already checked, should not happen");
+                Ok(())
+            }
+        }
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -172,6 +192,21 @@ impl<T> Socket for ReplySocket<T>
 
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         self.channel.bind(target)
+    }
+
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+        match peer_identification {
+            PeerIdentification::PeerId(peer_id) => {
+                self.tracker.close_connection(peer_id)?;
+                self.channel.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
+                Ok(())
+            },
+            PeerIdentification::TransportMethod(method) => {
+                let peer_id = (self.channel.close_connection(PeerIdentification::TransportMethod(method))?).unwrap();
+                self.tracker.close_connection(peer_id).expect("onnection existance already checked, should not happen");
+                Ok(())
+            }
+        }
     }
 
     fn close(self) -> Result<(), SocketError> {

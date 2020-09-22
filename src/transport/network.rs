@@ -3,7 +3,7 @@ use core::util;
 use core::util::thread::{StoppedSemaphore};
 use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
-use core::socket::{ConnectorError, SocketError, OpFlag};
+use core::socket::{ConnectorError, SocketError, OpFlag, PeerIdentification};
 use stream;
 
 use std::collections::{HashMap, VecDeque};
@@ -114,6 +114,23 @@ impl TCPConnectionManagerPeers {
         results
     }
 
+    pub fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
+        match peer_identification {
+            PeerIdentification::PeerId(peer_id) => {
+                self.peer_table.remove(&peer_id).ok_or(ConnectorError::UnknownPeer)?;
+                self.addresses.remove(&self.peers.remove(&peer_id).unwrap()).unwrap();
+                Ok(None)
+            },
+            PeerIdentification::TransportMethod(TransportMethod::Network(addr)) => {
+                let peer_id = self.addresses.remove(&addr).ok_or(ConnectorError::UnknownPeer)?;
+                self.peers.remove(&peer_id).unwrap();
+                self.peer_table.remove(&peer_id).unwrap();
+                Ok(Some(peer_id))
+            },
+            _ => Err(ConnectorError::UnknownPeer)
+        }
+    }
+
     fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a stream::ReadWriteStreamConnectionManager, SocketError> {
         match peer_id {
             Some(peerid) => match self.peer_table.get(&peerid) {
@@ -189,6 +206,11 @@ impl TCPConnectionManager {
         peers.send_message(message, flags)
     }
 
+    fn close_connection_internal(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
+        let mut peers = self.peers.lock().unwrap();
+        peers.close_connection(peer_identification)
+    }
+
     fn receive_from_all_connections(&mut self) {
         let peers = self.peers.lock().unwrap();
         self.inward_queue.extend(peers.receive_from_all_connections().into_iter())
@@ -224,8 +246,12 @@ impl Transport for TCPConnectionManager {
         }
     }
 
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
+        self.close_connection_internal(peer_identification)
+    }
+
     fn close(self) -> Result<(), SocketError> {
-        Err(SocketError::Timeout)
+        Ok(())
     }
 }
 
@@ -248,6 +274,10 @@ impl Transport for TCPInitiatorTransport {
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.manager.receive(flags)
+    }
+
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
+        self.manager.close_connection(peer_identification)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -294,7 +324,7 @@ impl TCPConnectionListener {
                     },
                     Err(err) => break Err(err)
                 };
-            }.unwrap();
+            }?;
 
             if stop_semaphore.is_stopped() {
                 break;
@@ -333,6 +363,10 @@ impl Transport for TCPAcceptorTransport {
         self.manager.receive(flags)
     }
 
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
+        self.manager.close_connection(peer_identification)
+    }
+
     fn close(self) -> Result<(), SocketError> {
         Ok(())
     }
@@ -352,9 +386,8 @@ impl AcceptorTransport for TCPAcceptorTransport {
 }
 
 impl Drop for TCPAcceptorTransport {
-    #[allow(unused_must_use)]
     fn drop(&mut self) {
         self.stop_semaphore.stop();
-        self.listener_thread.take().unwrap().join().unwrap();
+        self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
 }

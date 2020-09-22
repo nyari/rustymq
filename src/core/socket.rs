@@ -39,7 +39,14 @@ pub enum ConnectorError {
     AlreadyInUse,
     NotSupportedOperation,
     CouldNotConnect,
-    InternalError
+    InternalError,
+    AlreadyDisconnected,
+    UnknownPeer
+}
+
+pub enum PeerIdentification {
+    PeerId(PeerId),
+    TransportMethod(TransportMethod)
 }
 
 #[derive(Debug)]
@@ -68,6 +75,7 @@ pub enum QueryTypedError<T>
 pub trait Socket : Send + Sync {
     fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError>;
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError>;
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError>;
     fn close(self) -> Result<(), SocketError>;
 }
  

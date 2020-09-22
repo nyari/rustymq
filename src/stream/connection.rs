@@ -116,7 +116,7 @@ impl<S: io::Read + io::Write> ReadWriteStreamConnection<S> {
     pub fn proceed_sending(&mut self) -> Result<(), stream::State> {
         match self.writer.write_into(&mut self.stream) {
             Err(stream::State::Empty) => {
-                if let Some(metadata) = self.writer.get_metadata() {
+                if let Some(metadata) = self.writer.take_metadata() {
                     let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
                     prio_sent_messages.insert(metadata.clone());
                 }
