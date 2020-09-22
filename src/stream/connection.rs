@@ -210,6 +210,7 @@ impl<S: io::Read + io::Write> ReadWriteStreamConnectionWorker<S> {
 pub struct ReadWriteStreamConnectionManager {
     handle: ReadWriteStreamConnectionHandle,
     worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketError>>>>,
+    last_error: RefCell<Option<Result<(), SocketError>>>,
     stop_semaphore: StoppedSemaphore
 }
 
@@ -221,19 +222,30 @@ impl ReadWriteStreamConnectionManager {
         Ok(Self {
             handle: handle,
             worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
+            last_error: RefCell::new(None),
             stop_semaphore: stop_semaphore_clone
         })
     }
 
+    fn get_last_error(&self) -> Option<Result<(), SocketError>> {
+        self.last_error.borrow().clone()
+    }
+
     fn check_worker_state(&self) -> Result<(), SocketError> {
-        if self.stop_semaphore.is_stopped() {
-            match self.worker_thread.borrow_mut().take().unwrap().join() {
-                Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
-                Ok(error) => error,
-                Err(_) => Err(SocketError::InternalError)
-            }
+        if let Some(last_error) = self.get_last_error() {
+            last_error.clone()
         } else {
-            Ok(())
+            if self.stop_semaphore.is_stopped() {
+                let result = match self.worker_thread.borrow_mut().take().unwrap().join() {
+                    Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
+                    Ok(error) => error,
+                    Err(_) => Err(SocketError::InternalError)
+                };
+                *self.last_error.borrow_mut() = Some(result.clone());
+                result
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -270,10 +282,12 @@ impl ReadWriteStreamConnectionManager {
 impl Drop for ReadWriteStreamConnectionManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        self.stop_semaphore.stop();
-        match self.worker_thread.borrow_mut().take() {
-            Some(join_handle) => { join_handle.join(); },
-            None => ()
+        if self.last_error.borrow().is_none() {
+            self.stop_semaphore.stop();
+            match self.worker_thread.borrow_mut().take() {
+                Some(join_handle) => { join_handle.join(); },
+                None => ()
+            }
         }
     }
 }

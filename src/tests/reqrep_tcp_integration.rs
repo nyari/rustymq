@@ -126,5 +126,6 @@ fn simple_req_rep_tcp_test_disconnected_before_first_send() {
 
     assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Ok(_)));
     assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
+    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
     //assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
 }
