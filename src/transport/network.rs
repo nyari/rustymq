@@ -324,7 +324,7 @@ impl TCPConnectionListener {
                     },
                     Err(err) => break Err(err)
                 };
-            }.unwrap();
+            }?;
 
             if stop_semaphore.is_stopped() {
                 break;
@@ -386,9 +386,8 @@ impl AcceptorTransport for TCPAcceptorTransport {
 }
 
 impl Drop for TCPAcceptorTransport {
-    #[allow(unused_must_use)]
     fn drop(&mut self) {
         self.stop_semaphore.stop();
-        self.listener_thread.take().unwrap().join().unwrap();
+        self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
 }

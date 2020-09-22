@@ -32,8 +32,8 @@ impl RawMessageWriter {
         }
     }
 
-    pub fn get_metadata(&self) -> &Option<MessageMetadata> {
-        &self.metadata
+    pub fn take_metadata(&mut self) -> Option<MessageMetadata> {
+        self.metadata.take()
     }
 
     fn get_batch<'a>(&'a self) -> Option<BufferSlice<'a>> {

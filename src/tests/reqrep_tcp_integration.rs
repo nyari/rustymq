@@ -1,10 +1,10 @@
 pub use super::super::*;
 
 use core::socket::{Socket, SocketError, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket,
-                   QueryTypedError, ReceiveTypedError};
+                   QueryTypedError, ReceiveTypedError, SendTypedError};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
-use core::message::{TypedMessage, Buffer, Message};
+use core::message::{TypedMessage, Buffer, Message, MessageMetadata};
 use std::collections::{HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -109,4 +109,22 @@ fn stress_simple_req_rep_tcp_test() {
 
     *stop_semaphore_clone.lock().unwrap() = true;
     _replier_handle.join().unwrap();
+}
+
+#[test]
+fn simple_req_rep_tcp_test_disconnected_before_first_send() {
+    let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
+
+    replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
+    requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
+
+    let base = TestingStruct{a: 5, b: 5};
+    let message = TypedMessage::new(base);
+
+    replier.close().unwrap();
+
+    assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Ok(_)));
+    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
+    //assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
 }
