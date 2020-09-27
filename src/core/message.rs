@@ -27,6 +27,7 @@ pub enum Error {
 pub type MessageId = Identifier;
 pub type ConversationId = Identifier;
 pub type PeerId = Identifier;
+pub type CommunicationModelId = u16;
 
 #[derive(Clone)]
 #[derive(PartialEq)]
@@ -36,6 +37,7 @@ pub type PeerId = Identifier;
 pub struct MessageMetadata {
     messageid: MessageId,
     conversationid: ConversationId,
+    modelid: Option<CommunicationModelId>,
     peerid: Option<PeerId>,
     part: Option<Part>
 }
@@ -45,6 +47,7 @@ impl MessageMetadata {
         Self {
             messageid: MessageId::new_random(),
             conversationid: ConversationId::new_random(),
+            modelid: None,
             peerid: None,
             part: None
         }
@@ -86,12 +89,23 @@ impl MessageMetadata {
         }
     }
 
+    pub fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
+        Self {
+            modelid: Some(model_id),
+            ..self
+        }
+    }
+
     pub fn message_id(&self) -> &MessageId {
         &self.messageid
     }
 
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversationid
+    }
+
+    pub fn communication_model_id(&self) -> &Option<CommunicationModelId> {
+        &self.modelid
     }
 
     pub fn peer_id(&self) -> &Option<PeerId> {
@@ -178,6 +192,10 @@ pub trait Message: Sized
         self.metadata().conversation_id()
     }
 
+    fn communication_model_id(&self) -> &Option<CommunicationModelId> {
+        self.metadata().communication_model_id()
+    }
+
     fn peer_id(&self) -> &Option<PeerId> {
         self.metadata().peer_id()
     }
@@ -194,6 +212,10 @@ pub trait Message: Sized
     fn into_payload(self) -> Self::Payload;
 
     fn into_parts(self) -> (MessageMetadata, Self::Payload);
+
+    fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
+        self.mutated_metadata(|metadata| {metadata.commit_conversation_model_id(model_id)})
+    }
 
     fn continue_exhange(self, payload: Self::Payload) -> Self where Self: Sized {
         Self::with_metadata(self.metadata()
@@ -404,6 +426,7 @@ impl Serializable for MessageMetadata {
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.messageid);
         serializer.serialize(&self.conversationid);
+        serializer.serialize(&self.modelid);
         serializer.serialize(&self.peerid);
         serializer.serialize(&self.part);
     }
@@ -412,6 +435,7 @@ impl Serializable for MessageMetadata {
         Ok(Self {
             messageid: deserializer.deserialize()?,
             conversationid: deserializer.deserialize()?,
+            modelid: deserializer.deserialize()?,
             peerid: deserializer.deserialize()?,
             part: deserializer.deserialize()?
         })

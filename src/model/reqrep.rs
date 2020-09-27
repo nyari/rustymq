@@ -4,6 +4,9 @@ use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message
 
 use std::collections::{HashMap, HashSet};
 
+const REQUEST_MODELID: u16 = 0xFFF0;
+const REPLY_MODELID: u16 = 0xFFF1; 
+
 #[derive(Debug)]
 enum ConnTrackerError {
     NotNewPeer
@@ -102,6 +105,15 @@ impl<T> RequestSocket<T>
             tracker: ConnectionTracker::new()
         }
     }
+
+    pub fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
+        if message.communication_model_id().unwrap() == REPLY_MODELID {
+            Ok(())
+        } else {
+            self.channel.close_connection(PeerIdentification::PeerId(message.peer_id().unwrap())).unwrap();
+            Err((Some(message.peer_id().unwrap()), SocketError::IncompatiblePeer))
+        }
+    }
 }
 
 impl<T> Socket for RequestSocket<T>
@@ -143,6 +155,7 @@ impl<T> InwardSocket for RequestSocket<T>
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         match self.channel.receive(flags) {
             Ok(message) => {
+                self.handle_received_message_model_id(&message)?;
                 self.tracker.close_conversation(message).map_err(|error| {(None, error)})
             }
             Err(err) => Err(err)
@@ -153,10 +166,10 @@ impl<T> InwardSocket for RequestSocket<T>
 impl<T> OutwardSocket for RequestSocket<T>
     where T: InitiatorTransport
 {
-
     fn send(&mut self, message:RawMessage, flags:OpFlag) -> Result<MessageMetadata, SocketError> {
-        let metadata = message.metadata().clone();
-        match self.channel.send(self.tracker.initiate_new_conversation(self.tracker.apply_single_peer_if_needed(message)?)?, flags) {
+        let request_message = message.commit_conversation_model_id(REQUEST_MODELID);
+        let metadata = request_message.metadata().clone();
+        match self.channel.send(self.tracker.initiate_new_conversation(self.tracker.apply_single_peer_if_needed(request_message)?)?, flags) {
             Ok(()) => Ok(metadata),
             Err(err) => Err(err)
         }
@@ -179,6 +192,15 @@ impl<T> ReplySocket<T>
         Self {
             channel: transport,
             tracker: ConnectionTracker::new()
+        }
+    }
+
+    pub fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
+        if message.communication_model_id().unwrap() == REQUEST_MODELID {
+            Ok(())
+        } else {
+            self.channel.close_connection(PeerIdentification::PeerId(message.peer_id().unwrap())).unwrap();
+            Err((Some(message.peer_id().unwrap()), SocketError::IncompatiblePeer))
         }
     }
 }
@@ -219,6 +241,7 @@ impl<T> InwardSocket for ReplySocket<T>
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         let message = self.channel.receive(flags)?;
+        self.handle_received_message_model_id(&message)?;
         self.tracker.accept_peer(message.peer_id().unwrap().clone());
         self.tracker.initiate_new_conversation(message).map_err(|error| {(None, error)})
     }
@@ -228,7 +251,7 @@ impl<T> OutwardSocket for ReplySocket<T>
     where T: AcceptorTransport {
 
     fn send(&mut self, message:RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let processed_message = self.tracker.close_conversation(message)?;
+        let processed_message = self.tracker.close_conversation(message)?.commit_conversation_model_id(REPLY_MODELID);
         let message_metadata = processed_message.metadata().clone();
         self.channel.send(processed_message, flags)?;
         Ok(message_metadata)
