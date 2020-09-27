@@ -28,6 +28,7 @@ pub enum SocketError {
     IncompleteData,
     UnknownDataFormatReceived,
     Timeout,
+    IncompatiblePeer,
     UnsupportedOpFlag(OpFlag)
 }
 

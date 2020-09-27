@@ -89,7 +89,7 @@ impl MessageMetadata {
         }
     }
 
-    pub fn commit_model_id(self, model_id: CommunicationModelId) -> Self {
+    pub fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
         Self {
             modelid: Some(model_id),
             ..self
@@ -104,7 +104,7 @@ impl MessageMetadata {
         &self.conversationid
     }
 
-    pub fn get_model_id(&self) -> &Option<CommunicationModelId> {
+    pub fn communication_model_id(&self) -> &Option<CommunicationModelId> {
         &self.modelid
     }
 
@@ -192,6 +192,10 @@ pub trait Message: Sized
         self.metadata().conversation_id()
     }
 
+    fn communication_model_id(&self) -> &Option<CommunicationModelId> {
+        self.metadata().communication_model_id()
+    }
+
     fn peer_id(&self) -> &Option<PeerId> {
         self.metadata().peer_id()
     }
@@ -209,8 +213,8 @@ pub trait Message: Sized
 
     fn into_parts(self) -> (MessageMetadata, Self::Payload);
 
-    fn commit_model_id(self, model_id: CommunicationModelId) -> Self {
-        self.mutated_metadata(|metadata| {metadata.commit_model_id(model_id)})
+    fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
+        self.mutated_metadata(|metadata| {metadata.commit_conversation_model_id(model_id)})
     }
 
     fn continue_exhange(self, payload: Self::Payload) -> Self where Self: Sized {
