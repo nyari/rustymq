@@ -1,7 +1,7 @@
 use core::message::{Message, RawMessage, MessageMetadata};
 use core::util;
-use core::util::thread::{StoppedSemaphore};
-use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
+use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketError};
 use stream;
 
@@ -188,7 +188,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
     }
 
     pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketError> {
-        let mut sleep_backoff = query_thread_default_duration_backoff();
+        let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
         loop {
             loop {
                 let receiving = self.process_receiving()?;
@@ -196,13 +196,13 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
                 if receiving.is_free() && sending.is_free() {
                     break;
                 } else {
-                    sleep_backoff.reset();
+                    sleeper.reset();
                 }
             }
             if stop_semaphore.is_stopped() {
                 return Ok(());
             }
-            std::thread::sleep(sleep_backoff.step());
+            sleeper.reset();
         }
     }
 }

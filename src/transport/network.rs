@@ -1,7 +1,7 @@
 use core::message::{PeerId, Message, RawMessage};
 use core::util;
-use core::util::thread::{StoppedSemaphore};
-use core::util::time::{LinearDurationBackoff, DurationBackoff, DurationBackoffWithDebounce};
+use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::socket::{ConnectorError, SocketError, OpFlag, PeerIdentification};
 use stream;
@@ -323,14 +323,14 @@ impl TCPConnectionListener {
 
     pub fn main_loop(self, stop_semaphore: StoppedSemaphore) -> Result<(), ConnectorError> {
         self.listener.set_nonblocking(true).unwrap();
-        let mut sleep_backoff = query_acceptor_thread_default_duration_backoff();
+        let mut sleeper = Sleeper::new(query_acceptor_thread_default_duration_backoff());
         loop { 
             loop {
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
                         manager.accept_connection(TCPStreamConnectionBuilder::new(), incoming).unwrap();
-                        sleep_backoff.reset();
+                        sleeper.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
                                 matches!(err.kind(), std::io::ErrorKind::TimedOut) => {
@@ -344,7 +344,7 @@ impl TCPConnectionListener {
                 break;
             }
 
-            thread::sleep(sleep_backoff.step());
+            sleeper.sleep();
         };
 
         Ok(())

@@ -194,6 +194,27 @@ pub mod time {
 
 pub mod thread {
     use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    pub struct Sleeper<T:super::time::DurationBackoff> {
+        backoff: T
+    }
+
+    impl<T:super::time::DurationBackoff> Sleeper<T> {
+        pub fn new(backoff: T) -> Self {
+            Self {
+                backoff: backoff
+            }
+        }
+
+        pub fn sleep(&mut self) {
+            thread::sleep(self.backoff.step())
+        }
+
+        pub fn reset(&mut self) {
+            self.backoff.reset();
+        }
+    }
 
     pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
@@ -213,21 +234,23 @@ pub mod thread {
         }
     }
 
-    pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(mut backoff: B, operation: F) -> T {
+    pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
+        let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(backoff.step())
+            sleeper.sleep()
         }
     }
 
-    pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(mut backoff: B, mut operation: F) -> T {
+    pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
+        let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(backoff.step())
+            sleeper.sleep()
         }
     }
 
