@@ -63,7 +63,7 @@ impl ReadWriteStreamConnectionHandle {
 }
 
 
-pub struct ReadWriteStreamConnection<S: io::Read + io::Write> {
+pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     stream: S,
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
@@ -73,7 +73,7 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write> {
     inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
 }
 
-impl<S: io::Read + io::Write> ReadWriteStreamConnection<S> {
+impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     pub fn new(stream: S) -> Self {
         Self {
             stream: stream,
@@ -148,11 +148,11 @@ impl ReadWriteSteramConnectionWorkerState {
     }
 }
 
-pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write> {
+pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write + Send> {
     stream: ReadWriteStreamConnection<S>
 }
 
-impl<S: io::Read + io::Write> ReadWriteStreamConnectionWorker<S> {
+impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
     pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<(Self, ReadWriteStreamConnectionHandle), SocketError> {
         let worker = Self {
             stream: stream

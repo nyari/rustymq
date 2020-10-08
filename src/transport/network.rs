@@ -12,6 +12,7 @@ use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
+use std::io::{Read, Write};
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 
@@ -29,41 +30,29 @@ fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDeboun
         10), 100)
 }
 
-struct TCPStreamConnectionBuilder {}
+trait NetworkStreamConnectionBuilder<Stream: Read + Write + Send + 'static>
+{
+    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
 
-impl TCPStreamConnectionBuilder {
-    pub fn connect(addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
+    fn accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
+
+    fn manager_connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.connect(addr)?)
     }
 
-    pub fn accept_connection((stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
+    fn manager_accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
+        let (stream, addr) = sa;
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.accept_connection((stream, addr))?)
     }
-
-    pub fn manager_connect(addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(TCPStreamConnectionBuilder::connect(addr)?)
-    }
-
-    pub fn manager_accept_connection((stream, addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(TCPStreamConnectionBuilder::accept_connection((stream, addr))?)
-    }
-
 }
 
-struct TCPConnectionManagerPeers {
+struct NetworkConnectionManagerPeers {
     peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionManager>,
     addresses: HashMap<SocketAddr, PeerId>,
     peers: HashMap<PeerId, SocketAddr>
 }
 
-impl TCPConnectionManagerPeers {
+impl NetworkConnectionManagerPeers {
     pub fn new() -> Self {
         Self {
             peer_table: HashMap::new(),
@@ -72,16 +61,16 @@ impl TCPConnectionManagerPeers {
         }
     }
 
-    pub fn connect(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         if !self.is_already_connected(&address) {
-            self.connect_internal(address)
+            self.connect_internal(builder, address)
         } else {
             Err(ConnectorError::AlreadyConnected)
         }
     }
 
-    pub fn accept_connection(&mut self, (stream, addr): (net::TcpStream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match TCPStreamConnectionBuilder::manager_accept_connection((stream, addr)) {
+    pub fn accept_connection<Stream: Read + Write + Send + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
+        match builder.manager_accept_connection((stream, addr)) {
             Ok(connection) => self.commit_onnection(connection, addr),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
@@ -145,8 +134,8 @@ impl TCPConnectionManagerPeers {
         }
     }
 
-    fn connect_internal(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
-        match TCPStreamConnectionBuilder::manager_connect(address) {
+    fn connect_internal<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+        match builder.manager_connect(address) {
             Ok(connection) => self.commit_onnection(connection, address),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
@@ -179,26 +168,26 @@ impl TCPConnectionManagerPeers {
     }
 }
 
-struct TCPConnectionManager {
-    peers: Arc<Mutex<TCPConnectionManagerPeers>>,
+struct NetworkConnectionManager {
+    peers: Arc<Mutex<NetworkConnectionManagerPeers>>,
     inward_queue: VecDeque<Result<RawMessage, (PeerId, SocketError)>>
 }
 
-impl TCPConnectionManager {
+impl NetworkConnectionManager {
     pub fn new() -> Self {
         Self {
-            peers: Arc::new(Mutex::new(TCPConnectionManagerPeers::new())),
+            peers: Arc::new(Mutex::new(NetworkConnectionManagerPeers::new())),
             inward_queue: VecDeque::new()
         }
     }
 
-    pub fn get_peers(&self) -> Arc<Mutex<TCPConnectionManagerPeers>> {
+    pub fn get_peers(&self) -> Arc<Mutex<NetworkConnectionManagerPeers>> {
         self.peers.clone()
     }
 
-    pub fn connect(&mut self, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         let mut peers = self.peers.lock().unwrap();
-        peers.connect(address)
+        peers.connect(builder, address)
     }
 
     pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
@@ -217,7 +206,7 @@ impl TCPConnectionManager {
     }
 }
 
-impl Transport for TCPConnectionManager {
+impl Transport for NetworkConnectionManager {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.send_message(message, flags)
     }
@@ -255,14 +244,39 @@ impl Transport for TCPConnectionManager {
     }
 }
 
+struct TCPStreamConnectionBuilder {}
+
+impl TCPStreamConnectionBuilder {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl NetworkStreamConnectionBuilder<net::TcpStream> for TCPStreamConnectionBuilder {
+    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+        let stream = net::TcpStream::connect(addr)?;
+        stream.set_nonblocking(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        Ok(stream::ReadWriteStreamConnection::new(stream))
+    }
+
+    fn accept_connection(&self, (stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+        stream.set_nonblocking(true)?;
+        stream.set_write_timeout(None)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        Ok(stream::ReadWriteStreamConnection::new(stream))
+    }
+}
+
 pub struct TCPInitiatorTransport {
-    manager: TCPConnectionManager
+    manager: NetworkConnectionManager
 }
 
 impl TCPInitiatorTransport {
     pub fn new() -> Self {
         Self {
-            manager: TCPConnectionManager::new()
+            manager: NetworkConnectionManager::new()
         }
     }
 }
@@ -288,19 +302,19 @@ impl Transport for TCPInitiatorTransport {
 impl InitiatorTransport for TCPInitiatorTransport {
     fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         match target {
-            TransportMethod::Network(address) => Ok(Some(self.manager.connect(address)?)),
+            TransportMethod::Network(address) => Ok(Some(self.manager.connect(TCPStreamConnectionBuilder::new(), address)?)),
             _ => Err(ConnectorError::InvalidTransportMethod)
         }
     }
 }
 
 struct TCPConnectionListener {
-    manager: Arc<Mutex<TCPConnectionManagerPeers>>,
+    manager: Arc<Mutex<NetworkConnectionManagerPeers>>,
     listener: net::TcpListener
 }
 
 impl TCPConnectionListener {
-    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<TCPConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
+    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
         Ok(Self {
             manager: manager,
             listener: net::TcpListener::bind(addr)?
@@ -315,7 +329,7 @@ impl TCPConnectionListener {
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
-                        manager.accept_connection(incoming).unwrap();
+                        manager.accept_connection(TCPStreamConnectionBuilder::new(), incoming).unwrap();
                         sleep_backoff.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
@@ -338,7 +352,7 @@ impl TCPConnectionListener {
 }
 
 pub struct TCPAcceptorTransport {
-    manager: TCPConnectionManager,
+    manager: NetworkConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
     stop_semaphore: StoppedSemaphore
 }
@@ -347,7 +361,7 @@ impl TCPAcceptorTransport {
     pub fn new() -> Self {
         let stop_semaphore = StoppedSemaphore::new();
         Self {
-            manager: TCPConnectionManager::new(),
+            manager: NetworkConnectionManager::new(),
             listener_thread: None,
             stop_semaphore: stop_semaphore
         }
