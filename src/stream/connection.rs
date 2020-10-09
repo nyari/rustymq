@@ -202,7 +202,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
             if stop_semaphore.is_stopped() {
                 return Ok(());
             }
-            sleeper.reset();
+            sleeper.sleep();
         }
     }
 }
