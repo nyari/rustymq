@@ -43,19 +43,26 @@ impl TryFrom<Buffer> for TestingStruct {
 fn simple_pub_sub_tcp_test() {
     let mut subscriber1 = model::pubsub::SubscriberSocket::new(transport::network::TCPInitiatorTransport::new());
     let mut subscriber2 = model::pubsub::SubscriberSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut publisher = model::pubsub::PublisherSocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut publisher1 = model::pubsub::PublisherSocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut publisher2 = model::pubsub::PublisherSocket::new(transport::network::TCPAcceptorTransport::new());
 
-    publisher.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
+    publisher1.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
+    publisher2.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
     subscriber1.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
     subscriber2.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
+    subscriber1.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
+    subscriber2.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     let base = TestingStruct{a: 5, b: 5};
     let message = TypedMessage::new(base);
 
-    publisher.send_typed(message, OpFlag::NoWait).unwrap();
+    publisher1.send_typed(message.clone(), OpFlag::Default).unwrap();
+    publisher2.send_typed(message.clone(), OpFlag::Default).unwrap();
 
+    assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
+    assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
     assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
     assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
 }
