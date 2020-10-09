@@ -6,13 +6,14 @@ use core::transport::{Transport, InitiatorTransport, AcceptorTransport, Transpor
 use core::socket::{ConnectorError, SocketError, OpFlag, PeerIdentification};
 use stream;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net;
 use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
 use std::io::{Read, Write};
+use std::iter::{FromIterator};
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 
@@ -101,6 +102,10 @@ impl NetworkConnectionManagerPeers {
             }
         });
         results
+    }
+
+    pub fn query_connected_peers(&self) -> HashSet<PeerId> {
+        HashSet::from_iter(self.peer_table.keys().map(|x| {x.clone()}))
     }
 
     pub fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
@@ -235,6 +240,11 @@ impl Transport for NetworkConnectionManager {
         }
     }
 
+    fn query_connected_peers(&self) -> HashSet<PeerId> {
+        let peers = self.peers.lock().unwrap();
+        peers.query_connected_peers()
+    }
+
     fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
         self.close_connection_internal(peer_identification)
     }
@@ -292,6 +302,10 @@ impl Transport for TCPInitiatorTransport {
 
     fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
         self.manager.close_connection(peer_identification)
+    }
+
+    fn query_connected_peers(&self) -> HashSet<PeerId> {
+        self.manager.query_connected_peers()
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -379,6 +393,10 @@ impl Transport for TCPAcceptorTransport {
 
     fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<Option<PeerId>, ConnectorError> {
         self.manager.close_connection(peer_identification)
+    }
+
+    fn query_connected_peers(&self) -> HashSet<PeerId> {
+        self.manager.query_connected_peers()
     }
 
     fn close(self) -> Result<(), SocketError> {
