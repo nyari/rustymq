@@ -49,6 +49,8 @@ fn simple_pub_sub_tcp_test() {
     subscriber1.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
     subscriber2.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
 
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
     let base = TestingStruct{a: 5, b: 5};
     let message = TypedMessage::new(base);
 
