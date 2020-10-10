@@ -62,6 +62,17 @@ impl ReadWriteStreamConnectionHandle {
     }
 }
 
+#[derive(Debug)]
+pub enum ReadWriteStremConnectionState {
+    Busy,
+    Free
+}
+
+impl ReadWriteStremConnectionState {
+    pub fn is_free(&self) -> bool {
+        matches!(self, ReadWriteStremConnectionState::Free)
+    }
+}
 
 pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     stream: S,
@@ -113,7 +124,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         }
     }
 
-    pub fn proceed_sending(&mut self) -> Result<(), stream::State> {
+    fn proceed_sending(&mut self) -> Result<(), stream::State> {
         match self.writer.write_into(&mut self.stream) {
             Err(stream::State::Empty) => {
                 if let Some(metadata) = self.writer.take_metadata() {
@@ -126,7 +137,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         }
     }
 
-    pub fn proceed_receiving(&mut self) -> Result<(), stream::State> {
+    fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         let messages = self.reader.read_into(&mut self.stream)?;
         let mut inward_queue = self.inward_queue.lock().unwrap();
         messages.into_iter().for_each(|message| {
@@ -134,17 +145,31 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         });
         Ok(())
     }
-}
 
-#[derive(Debug)]
-pub enum ReadWriteSteramConnectionWorkerState {
-    Busy,
-    Free
-}
+    pub fn process_receiving(&mut self) -> Result<ReadWriteStremConnectionState, SocketError> {
+        match self.proceed_receiving() {
+            Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
+            Err(stream::State::Remainder) => Ok(ReadWriteStremConnectionState::Busy),
+            Err(stream::State::Empty) => {
+                Ok(ReadWriteStremConnectionState::Free)
+            }
+            Err(stream::State::Stream(err)) => Err(err)
+        }
+    }
 
-impl ReadWriteSteramConnectionWorkerState {
-    pub fn is_free(&self) -> bool {
-        matches!(self, ReadWriteSteramConnectionWorkerState::Free)
+    pub fn process_sending(&mut self) -> Result<ReadWriteStremConnectionState, SocketError> {
+        match self.proceed_sending() {
+            Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
+            Err(stream::State::Empty) => {
+                if let Err(stream::State::Empty) = self.start_next_message() {
+                    Ok(ReadWriteStremConnectionState::Free)
+                } else {
+                    Ok(ReadWriteStremConnectionState::Busy)
+                }
+            }
+            Err(stream::State::Stream(err)) => Err(err),
+            Err(stream::State::Remainder) => panic!("Internal error")
+        }
     }
 }
 
@@ -161,38 +186,12 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
         Ok((worker, handle))
     }
 
-    fn process_receiving(&mut self) -> Result<ReadWriteSteramConnectionWorkerState, SocketError> {
-        match self.stream.proceed_receiving() {
-            Ok(()) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
-            Err(stream::State::Remainder) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
-            Err(stream::State::Empty) => {
-                Ok(ReadWriteSteramConnectionWorkerState::Free)
-            }
-            Err(stream::State::Stream(err)) => Err(err)
-        }
-    }
-
-    fn process_sending(&mut self) -> Result<ReadWriteSteramConnectionWorkerState, SocketError> {
-        match self.stream.proceed_sending() {
-            Ok(()) => Ok(ReadWriteSteramConnectionWorkerState::Busy),
-            Err(stream::State::Empty) => {
-                if let Err(stream::State::Empty) = self.stream.start_next_message() {
-                    Ok(ReadWriteSteramConnectionWorkerState::Free)
-                } else {
-                    Ok(ReadWriteSteramConnectionWorkerState::Busy)
-                }
-            }
-            Err(stream::State::Stream(err)) => Err(err),
-            Err(stream::State::Remainder) => panic!("Internal error")
-        }
-    }
-
     pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketError> {
         let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
         loop {
             loop {
-                let receiving = self.process_receiving()?;
-                let sending = self.process_sending()?;
+                let receiving = self.stream.process_receiving()?;
+                let sending = self.stream.process_sending()?;
                 if receiving.is_free() && sending.is_free() {
                     break;
                 } else {
