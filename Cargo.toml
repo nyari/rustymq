@@ -4,7 +4,6 @@ version = "0.0.1"
 authors = ["David Tamas Nyari <nyaridavid@gmail.com>"]
 
 [dependencies]
-regex = "1.*"
 rand = "0.7.*"
 
 [profile.dev]
