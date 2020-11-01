@@ -3,8 +3,13 @@ name = "rustymq"
 version = "0.0.1"
 authors = ["David Tamas Nyari <nyaridavid@gmail.com>"]
 
+[features]
+default = []
+network-openssl-socket-support = ["openssl"]
+
 [dependencies]
 rand = "0.7.*"
+openssl = { version = "0.10", optional = true }
 
 [profile.dev]
 opt-level = 0
