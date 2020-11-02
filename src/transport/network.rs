@@ -31,18 +31,19 @@ fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDeboun
         10), 100)
 }
 
-trait NetworkStreamConnectionBuilder<Stream: Read + Write + Send + 'static>
+trait NetworkStreamConnectionBuilder
 {
-    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
+    type Stream: Read + Write + Send + 'static;
 
-    fn accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
+    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
+
+    fn accept_connection(&self, sa: (Self::Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
 
     fn manager_connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.connect(addr)?)
     }
 
-    fn manager_accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
-        let (stream, addr) = sa;
+    fn manager_accept_connection(&self, stream: Self::Stream, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.accept_connection((stream, addr))?)
     }
 }
@@ -62,7 +63,7 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         if !self.is_already_connected(&address) {
             self.connect_internal(builder, address)
         } else {
@@ -70,8 +71,8 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn accept_connection<Stream: Read + Write + Send + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match builder.manager_accept_connection((stream, addr)) {
+    pub fn accept_connection<Stream: Read + Write + Send + 'static, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
+        match builder.manager_accept_connection(stream, addr) {
             Ok(connection) => self.commit_onnection(connection, addr),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
@@ -139,7 +140,7 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    fn connect_internal<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    fn connect_internal<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         match builder.manager_connect(address) {
             Ok(connection) => self.commit_onnection(connection, address),
             Err(_) => Err(ConnectorError::CouldNotConnect)
@@ -190,7 +191,7 @@ impl NetworkConnectionManager {
         self.peers.clone()
     }
 
-    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         let mut peers = self.peers.lock().unwrap();
         peers.connect(builder, address)
     }
@@ -262,7 +263,9 @@ impl TCPStreamConnectionBuilder {
     }
 }
 
-impl NetworkStreamConnectionBuilder<net::TcpStream> for TCPStreamConnectionBuilder {
+impl NetworkStreamConnectionBuilder for TCPStreamConnectionBuilder {
+    type Stream = net::TcpStream;
+    
     fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
         stream.set_nonblocking(true)?;
