@@ -35,9 +35,8 @@ fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDeboun
 }
 
 pub trait NetworkStream: Read + Write + Send + Sync + Sized + 'static {}
-impl NetworkStream for net::TcpStream {}
 
-pub trait NetworkListener: Sized {
+pub trait NetworkListener: Send + Sync + Sized + 'static {
     type Stream : NetworkStream;
 
     fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self>;
@@ -51,56 +50,7 @@ pub trait NetworkListener: Sized {
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
 }
 
-impl NetworkListener for net::TcpListener {
-    type Stream = net::TcpStream;
-
-    #[inline]
-    fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        net::TcpListener::bind(addr)
-    }
-
-    #[inline]
-    fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.local_addr()
-    }
-
-    #[inline]
-    fn try_clone(&self) -> io::Result<Self> {
-        self.try_clone()
-    }
-
-    #[inline]
-    fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)> {
-        self.accept()
-    }
-
-    #[inline]
-    fn incoming(&self) -> net::Incoming<'_> {
-        self.incoming()
-    }
-
-    #[inline]
-    fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        self.set_ttl(ttl)
-    }
-
-    #[inline]
-    fn ttl(&self) -> io::Result<u32> {
-        self.ttl()
-    }
-
-    #[inline]
-    fn take_error(&self) -> io::Result<Option<io::Error>> {
-        self.take_error()
-    }
-
-    #[inline]
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-        self.set_nonblocking(nonblocking)
-    }
-}
-
-pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized
+pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + 'static
 {
     type Stream: NetworkStream;
 
@@ -326,38 +276,6 @@ impl Transport for NetworkConnectionManager {
     }
 }
 
-pub struct TCPStreamConnectionBuilder {}
-
-impl TCPStreamConnectionBuilder {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl NetworkStreamConnectionBuilder for TCPStreamConnectionBuilder {
-    type Stream = net::TcpStream;
-
-    fn new() -> Self {
-        Self {
-        }
-    }
-
-    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
-    }
-
-    fn accept_connection(&self, (stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
-    }
-}
-
 pub struct NetworkInitiatorTransport<Builder: NetworkStreamConnectionBuilder> {
     manager: NetworkConnectionManager,
     _builder: PhantomData<Builder>
@@ -402,8 +320,6 @@ impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport for NetworkInit
         }
     }
 }
-
-pub type TCPInitiatorTransport = NetworkInitiatorTransport<TCPStreamConnectionBuilder>;
 
 pub struct NetworkConnectionListener<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
     manager: Arc<Mutex<NetworkConnectionManagerPeers>>,
@@ -450,26 +366,28 @@ impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=L
     }
 }
 
-pub type TCPConnectionListener = NetworkConnectionListener<net::TcpListener, TCPStreamConnectionBuilder>;
-
-pub struct TCPAcceptorTransport {
+pub struct NetworkAcceptorTransport<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
     manager: NetworkConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
-    stop_semaphore: StoppedSemaphore
+    stop_semaphore: StoppedSemaphore,
+    _listener: PhantomData<Listener>,
+    _builder: PhantomData<Builder>
 }
 
-impl TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkAcceptorTransport<Listener, Builder> {
     pub fn new() -> Self {
         let stop_semaphore = StoppedSemaphore::new();
         Self {
             manager: NetworkConnectionManager::new(),
             listener_thread: None,
-            stop_semaphore: stop_semaphore
+            stop_semaphore: stop_semaphore,
+            _listener: PhantomData,
+            _builder: PhantomData
         }
     }
 }
 
-impl Transport for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> Transport for NetworkAcceptorTransport<Listener, Builder> {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.manager.send(message, flags)
     }
@@ -491,10 +409,10 @@ impl Transport for TCPAcceptorTransport {
     }
 }
 
-impl AcceptorTransport for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> AcceptorTransport for NetworkAcceptorTransport<Listener, Builder> {
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         if let TransportMethod::Network(addr) = target {
-            let listener = TCPConnectionListener::bind(addr, self.manager.get_peers())?;
+            let listener: NetworkConnectionListener<Listener, Builder> = NetworkConnectionListener::bind(addr, self.manager.get_peers())?;
             let stop_semaphore = self.stop_semaphore.clone();
             self.listener_thread = Some(thread::spawn(move || {listener.main_loop(stop_semaphore)}));
             Ok(None)
@@ -504,9 +422,100 @@ impl AcceptorTransport for TCPAcceptorTransport {
     }
 }
 
-impl Drop for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> Drop for NetworkAcceptorTransport<Listener, Builder> {
     fn drop(&mut self) {
         self.stop_semaphore.stop();
         self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
+}
+
+pub mod tcp {
+    use super::*;
+
+    impl NetworkStream for net::TcpStream {}
+
+    impl NetworkListener for net::TcpListener {
+        type Stream = net::TcpStream;
+    
+        #[inline]
+        fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self> {
+            net::TcpListener::bind(addr)
+        }
+    
+        #[inline]
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            self.local_addr()
+        }
+    
+        #[inline]
+        fn try_clone(&self) -> io::Result<Self> {
+            self.try_clone()
+        }
+    
+        #[inline]
+        fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)> {
+            self.accept()
+        }
+    
+        #[inline]
+        fn incoming(&self) -> net::Incoming<'_> {
+            self.incoming()
+        }
+    
+        #[inline]
+        fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+            self.set_ttl(ttl)
+        }
+    
+        #[inline]
+        fn ttl(&self) -> io::Result<u32> {
+            self.ttl()
+        }
+    
+        #[inline]
+        fn take_error(&self) -> io::Result<Option<io::Error>> {
+            self.take_error()
+        }
+    
+        #[inline]
+        fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+            self.set_nonblocking(nonblocking)
+        }
+    }
+
+    pub struct StreamConnectionBuilder {}
+
+    impl StreamConnectionBuilder {
+        pub fn new() -> Self {
+            Self {}
+        }
+    }
+    
+    impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
+        type Stream = net::TcpStream;
+    
+        fn new() -> Self {
+            Self {
+            }
+        }
+    
+        fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+            let stream = net::TcpStream::connect(addr)?;
+            stream.set_nonblocking(true)?;
+            stream.set_write_timeout(None)?;
+            stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+            Ok(stream::ReadWriteStreamConnection::new(stream))
+        }
+    
+        fn accept_connection(&self, (stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+            stream.set_nonblocking(true)?;
+            stream.set_write_timeout(None)?;
+            stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+            Ok(stream::ReadWriteStreamConnection::new(stream))
+        }
+    }
+
+    pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
+    pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
+    pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamConnectionBuilder>;
 }

@@ -44,8 +44,8 @@ impl TryFrom<Buffer> for TestingStruct {
 
 #[test]
 fn simple_req_rep_tcp_test() {
-    let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new());
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new());
 
     replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45321))).unwrap();
     requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45321))).unwrap();
@@ -64,8 +64,8 @@ fn simple_req_rep_tcp_test() {
 
 #[test]
 fn stress_simple_req_rep_tcp_test() {
-    let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new());
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new());
 
     replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
     requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 48000))).unwrap();
@@ -113,8 +113,8 @@ fn stress_simple_req_rep_tcp_test() {
 
 #[test]
 fn simple_req_rep_tcp_test_disconnected_before_first_send() {
-    let mut requestor = model::reqrep::RequestSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new());
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new());
 
     replier.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
     requestor.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 45322))).unwrap();
