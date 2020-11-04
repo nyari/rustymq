@@ -17,9 +17,6 @@ use std::io::{Read, Write};
 use std::iter::{FromIterator};
 use std::marker::{PhantomData};
 
-
-const SOCKET_READ_TIMEOUT_MS: u64 = 16;
-
 fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
     DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
         Duration::from_millis(0),
@@ -427,95 +424,4 @@ impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=L
         self.stop_semaphore.stop();
         self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
-}
-
-pub mod tcp {
-    use super::*;
-
-    impl NetworkStream for net::TcpStream {}
-
-    impl NetworkListener for net::TcpListener {
-        type Stream = net::TcpStream;
-    
-        #[inline]
-        fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self> {
-            net::TcpListener::bind(addr)
-        }
-    
-        #[inline]
-        fn local_addr(&self) -> io::Result<SocketAddr> {
-            self.local_addr()
-        }
-    
-        #[inline]
-        fn try_clone(&self) -> io::Result<Self> {
-            self.try_clone()
-        }
-    
-        #[inline]
-        fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)> {
-            self.accept()
-        }
-    
-        #[inline]
-        fn incoming(&self) -> net::Incoming<'_> {
-            self.incoming()
-        }
-    
-        #[inline]
-        fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-            self.set_ttl(ttl)
-        }
-    
-        #[inline]
-        fn ttl(&self) -> io::Result<u32> {
-            self.ttl()
-        }
-    
-        #[inline]
-        fn take_error(&self) -> io::Result<Option<io::Error>> {
-            self.take_error()
-        }
-    
-        #[inline]
-        fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-            self.set_nonblocking(nonblocking)
-        }
-    }
-
-    pub struct StreamConnectionBuilder {}
-
-    impl StreamConnectionBuilder {
-        pub fn new() -> Self {
-            Self {}
-        }
-    }
-    
-    impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
-        type Stream = net::TcpStream;
-    
-        fn new() -> Self {
-            Self {
-            }
-        }
-    
-        fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-            let stream = net::TcpStream::connect(addr)?;
-            stream.set_nonblocking(true)?;
-            stream.set_write_timeout(None)?;
-            stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-            Ok(stream::ReadWriteStreamConnection::new(stream))
-        }
-    
-        fn accept_connection(&self, (stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-            stream.set_nonblocking(true)?;
-            stream.set_write_timeout(None)?;
-            stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-            Ok(stream::ReadWriteStreamConnection::new(stream))
-        }
-    }
-
-    pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
-    pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
-    pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamConnectionBuilder>;
 }
