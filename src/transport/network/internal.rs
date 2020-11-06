@@ -47,11 +47,9 @@ pub trait NetworkListener: Send + Sync + Sized + 'static {
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
 }
 
-pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + 'static
+pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
 {
     type Stream: NetworkStream;
-
-    fn new() -> Self;
 
     fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
 
@@ -275,14 +273,14 @@ impl Transport for NetworkConnectionManager {
 
 pub struct NetworkInitiatorTransport<Builder: NetworkStreamConnectionBuilder> {
     manager: NetworkConnectionManager,
-    _builder: PhantomData<Builder>
+    builder: Builder
 }
 
 impl<Builder: NetworkStreamConnectionBuilder> NetworkInitiatorTransport<Builder> {
-    pub fn new() -> Self {
+    pub fn new(builder: Builder) -> Self {
         Self {
             manager: NetworkConnectionManager::new(),
-            _builder: PhantomData
+            builder: builder
         }
     }
 }
@@ -312,7 +310,7 @@ impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTran
 impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport for NetworkInitiatorTransport<Builder> {
     fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         match target {
-            TransportMethod::Network(address) => Ok(Some(self.manager.connect(Builder::new(), address)?)),
+            TransportMethod::Network(address) => Ok(Some(self.manager.connect(self.builder.clone(), address)?)),
             _ => Err(ConnectorError::InvalidTransportMethod)
         }
     }
@@ -321,15 +319,15 @@ impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport for NetworkInit
 pub struct NetworkConnectionListener<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
     manager: Arc<Mutex<NetworkConnectionManagerPeers>>,
     listener: Listener,
-    _builder: PhantomData<Builder>
+    builder: Builder
 }
 
 impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkConnectionListener<Listener, Builder> {
-    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
+    pub fn bind(builder: Builder, addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
         Ok(Self {
             manager: manager,
             listener: Listener::bind(addr)?,
-            _builder: PhantomData
+            builder: builder
         })
     }
 
@@ -341,7 +339,7 @@ impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=L
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
-                        manager.accept_connection(Builder::new(), incoming).unwrap();
+                        manager.accept_connection(self.builder.clone(), incoming).unwrap();
                         sleeper.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
@@ -368,18 +366,18 @@ pub struct NetworkAcceptorTransport<Listener: NetworkListener, Builder: NetworkS
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
     stop_semaphore: StoppedSemaphore,
     _listener: PhantomData<Listener>,
-    _builder: PhantomData<Builder>
+    builder: Builder
 }
 
 impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkAcceptorTransport<Listener, Builder> {
-    pub fn new() -> Self {
+    pub fn new(builder: Builder) -> Self {
         let stop_semaphore = StoppedSemaphore::new();
         Self {
             manager: NetworkConnectionManager::new(),
             listener_thread: None,
             stop_semaphore: stop_semaphore,
             _listener: PhantomData,
-            _builder: PhantomData
+            builder: builder
         }
     }
 }
@@ -409,7 +407,7 @@ impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=L
 impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> AcceptorTransport for NetworkAcceptorTransport<Listener, Builder> {
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         if let TransportMethod::Network(addr) = target {
-            let listener: NetworkConnectionListener<Listener, Builder> = NetworkConnectionListener::bind(addr, self.manager.get_peers())?;
+            let listener: NetworkConnectionListener<Listener, Builder> = NetworkConnectionListener::bind(self.builder.clone(), addr, self.manager.get_peers())?;
             let stop_semaphore = self.stop_semaphore.clone();
             self.listener_thread = Some(thread::spawn(move || {listener.main_loop(stop_semaphore)}));
             Ok(None)

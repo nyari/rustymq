@@ -58,6 +58,7 @@ impl NetworkListener for net::TcpListener {
     }
 }
 
+#[derive(Clone)]
 pub struct StreamConnectionBuilder {}
 
 impl StreamConnectionBuilder {
@@ -68,11 +69,6 @@ impl StreamConnectionBuilder {
 
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = net::TcpStream;
-
-    fn new() -> Self {
-        Self {
-        }
-    }
 
     fn connect(&self, addr: net::SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
