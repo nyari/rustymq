@@ -1,12 +1,15 @@
+pub mod network;
+
+pub use self::network::NetworkAddress;
+
 use core::message::{RawMessage, PeerId};
 use core::socket::{SocketError, ConnectorError, OpFlag, PeerIdentification};
-use std::net::{SocketAddr};
 use std::collections::{HashSet};
 
 #[derive(Debug)]
 pub enum TransportMethod
 {
-    Network(SocketAddr),
+    Network(NetworkAddress),
     Dummy
 }
 

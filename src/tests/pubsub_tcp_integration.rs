@@ -3,6 +3,7 @@ pub use super::super::*;
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
+use core::transport::{NetworkAddress};
 use core::message::{TypedMessage, Buffer, Message};
 
 use std::convert::{TryFrom};
@@ -46,12 +47,12 @@ fn simple_pub_sub_tcp_test() {
     let mut publisher1 = model::pubsub::PublisherSocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
     let mut publisher2 = model::pubsub::PublisherSocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
 
-    publisher1.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
-    publisher2.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
-    subscriber1.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
-    subscriber2.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
-    subscriber1.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
-    subscriber2.connect(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
+    publisher1.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46000".to_string()).unwrap())).unwrap();
+    publisher2.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46001".to_string()).unwrap())).unwrap();
+    subscriber1.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46000".to_string()).unwrap())).unwrap();
+    subscriber2.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46000".to_string()).unwrap())).unwrap();
+    subscriber1.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46001".to_string()).unwrap())).unwrap();
+    subscriber2.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:46001".to_string()).unwrap())).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 
