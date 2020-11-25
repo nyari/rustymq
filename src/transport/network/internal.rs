@@ -2,7 +2,7 @@ use core::message::{PeerId, Message, RawMessage};
 use core::util;
 use core::util::thread::{StoppedSemaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
-use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod};
+use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod, NetworkAddress};
 use core::socket::{ConnectorError, SocketError, OpFlag, PeerIdentification};
 use stream;
 
@@ -79,9 +79,9 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
-        if !self.is_already_connected(&address) {
-            self.connect_internal(builder, address)
+    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: NetworkAddress) -> Result<PeerId, ConnectorError> {
+        if !self.is_already_connected(&address.get_address()) {
+            self.connect_internal(builder, address.get_address())
         } else {
             Err(ConnectorError::AlreadyConnected)
         }
@@ -133,7 +133,7 @@ impl NetworkConnectionManagerPeers {
                 Ok(None)
             },
             PeerIdentification::TransportMethod(TransportMethod::Network(addr)) => {
-                let peer_id = self.addresses.remove(&addr).ok_or(ConnectorError::UnknownPeer)?;
+                let peer_id = self.addresses.remove(&addr.get_address()).ok_or(ConnectorError::UnknownPeer)?;
                 self.peers.remove(&peer_id).unwrap();
                 self.peer_table.remove(&peer_id).unwrap();
                 Ok(Some(peer_id))
@@ -207,7 +207,7 @@ impl NetworkConnectionManager {
         self.peers.clone()
     }
 
-    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: NetworkAddress) -> Result<PeerId, ConnectorError> {
         let mut peers = self.peers.lock().unwrap();
         peers.connect(builder, address)
     }
@@ -323,7 +323,7 @@ pub struct NetworkConnectionListener<Listener: NetworkListener, Builder: Network
 }
 
 impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkConnectionListener<Listener, Builder> {
-    pub fn bind(builder: Builder, addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
+    pub fn bind(builder: Builder, addr: NetworkAddress, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
         Ok(Self {
             manager: manager,
             listener: Listener::bind(addr)?,
