@@ -1,6 +1,7 @@
 use rand;
 use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
+use std;
 
 #[derive(PartialEq)]
 #[derive(Eq)]
@@ -92,6 +93,25 @@ impl Serializable for VersionInfo {
             deserializer.deserialize::<u16>()?,
             deserializer.deserialize::<u16>()?
         ))
+    }
+}
+
+pub struct SingleIter<T> {
+    item: Option<T>
+}
+
+impl<T> SingleIter<T> {
+    pub fn new(item: T) -> Self {
+        Self {
+            item: Some(item)
+        }
+    }
+}
+
+impl<T> std::iter::Iterator for SingleIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.item.take()
     }
 }
 
