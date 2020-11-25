@@ -12,10 +12,10 @@ use std::net::{SocketAddr};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
+use std::io;
 use std::io::{Read, Write};
 use std::iter::{FromIterator};
-
-const SOCKET_READ_TIMEOUT_MS: u64 = 16;
+use std::marker::{PhantomData};
 
 fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
     DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
@@ -31,23 +31,40 @@ fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDeboun
         10), 100)
 }
 
-trait NetworkStreamConnectionBuilder<Stream: Read + Write + Send + 'static>
-{
-    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
+pub trait NetworkStream: Read + Write + Send + Sync + Sized + 'static {}
 
-    fn accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Stream>, SocketError>;
+pub trait NetworkListener: Send + Sync + Sized + 'static {
+    type Stream : NetworkStream;
+
+    fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self>;
+    fn local_addr(&self) -> io::Result<SocketAddr>;
+    fn try_clone(&self) -> io::Result<Self>;
+    fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)>;
+    fn incoming(&self) -> net::Incoming<'_>;
+    fn set_ttl(&self, ttl: u32) -> io::Result<()>;
+    fn ttl(&self) -> io::Result<u32>;
+    fn take_error(&self) -> io::Result<Option<io::Error>>;
+    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
+}
+
+pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
+{
+    type Stream: NetworkStream;
+
+    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
+
+    fn accept_connection(&self, sa: (Self::Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
 
     fn manager_connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.connect(addr)?)
     }
 
-    fn manager_accept_connection(&self, sa: (Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
-        let (stream, addr) = sa;
+    fn manager_accept_connection(&self, stream: Self::Stream, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.accept_connection((stream, addr))?)
     }
 }
 
-struct NetworkConnectionManagerPeers {
+pub struct NetworkConnectionManagerPeers {
     peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionManager>,
     addresses: HashMap<SocketAddr, PeerId>,
     peers: HashMap<PeerId, SocketAddr>
@@ -62,7 +79,7 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         if !self.is_already_connected(&address) {
             self.connect_internal(builder, address)
         } else {
@@ -70,8 +87,8 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn accept_connection<Stream: Read + Write + Send + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match builder.manager_accept_connection((stream, addr)) {
+    pub fn accept_connection<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
+        match builder.manager_accept_connection(stream, addr) {
             Ok(connection) => self.commit_onnection(connection, addr),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
@@ -139,7 +156,7 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    fn connect_internal<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    fn connect_internal<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         match builder.manager_connect(address) {
             Ok(connection) => self.commit_onnection(connection, address),
             Err(_) => Err(ConnectorError::CouldNotConnect)
@@ -190,7 +207,7 @@ impl NetworkConnectionManager {
         self.peers.clone()
     }
 
-    pub fn connect<Stream: Read + Write + Send + Sized + 'static, Builder: NetworkStreamConnectionBuilder<Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
+    pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
         let mut peers = self.peers.lock().unwrap();
         peers.connect(builder, address)
     }
@@ -254,44 +271,21 @@ impl Transport for NetworkConnectionManager {
     }
 }
 
-struct TCPStreamConnectionBuilder {}
-
-impl TCPStreamConnectionBuilder {
-    pub fn new() -> Self {
-        Self {}
-    }
+pub struct NetworkInitiatorTransport<Builder: NetworkStreamConnectionBuilder> {
+    manager: NetworkConnectionManager,
+    builder: Builder
 }
 
-impl NetworkStreamConnectionBuilder<net::TcpStream> for TCPStreamConnectionBuilder {
-    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
-    }
-
-    fn accept_connection(&self, (stream, _addr): (net::TcpStream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
-    }
-}
-
-pub struct TCPInitiatorTransport {
-    manager: NetworkConnectionManager
-}
-
-impl TCPInitiatorTransport {
-    pub fn new() -> Self {
+impl<Builder: NetworkStreamConnectionBuilder> NetworkInitiatorTransport<Builder> {
+    pub fn new(builder: Builder) -> Self {
         Self {
-            manager: NetworkConnectionManager::new()
+            manager: NetworkConnectionManager::new(),
+            builder: builder
         }
     }
 }
 
-impl Transport for TCPInitiatorTransport {
+impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTransport<Builder> {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.manager.send(message, flags)
     }
@@ -313,25 +307,27 @@ impl Transport for TCPInitiatorTransport {
     }
 }
 
-impl InitiatorTransport for TCPInitiatorTransport {
+impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport for NetworkInitiatorTransport<Builder> {
     fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         match target {
-            TransportMethod::Network(address) => Ok(Some(self.manager.connect(TCPStreamConnectionBuilder::new(), address)?)),
+            TransportMethod::Network(address) => Ok(Some(self.manager.connect(self.builder.clone(), address)?)),
             _ => Err(ConnectorError::InvalidTransportMethod)
         }
     }
 }
 
-struct TCPConnectionListener {
+pub struct NetworkConnectionListener<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
     manager: Arc<Mutex<NetworkConnectionManagerPeers>>,
-    listener: net::TcpListener
+    listener: Listener,
+    builder: Builder
 }
 
-impl TCPConnectionListener {
-    pub fn bind(addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkConnectionListener<Listener, Builder> {
+    pub fn bind(builder: Builder, addr: SocketAddr, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, ConnectorError> {
         Ok(Self {
             manager: manager,
-            listener: net::TcpListener::bind(addr)?
+            listener: Listener::bind(addr)?,
+            builder: builder
         })
     }
 
@@ -343,7 +339,7 @@ impl TCPConnectionListener {
                 match self.listener.accept() {
                     Ok(incoming) => {
                         let mut manager = self.manager.lock().unwrap();
-                        manager.accept_connection(TCPStreamConnectionBuilder::new(), incoming).unwrap();
+                        manager.accept_connection(self.builder.clone(), incoming).unwrap();
                         sleeper.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
@@ -365,24 +361,28 @@ impl TCPConnectionListener {
     }
 }
 
-pub struct TCPAcceptorTransport {
+pub struct NetworkAcceptorTransport<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
     manager: NetworkConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), ConnectorError>>>,
-    stop_semaphore: StoppedSemaphore
+    stop_semaphore: StoppedSemaphore,
+    _listener: PhantomData<Listener>,
+    builder: Builder
 }
 
-impl TCPAcceptorTransport {
-    pub fn new() -> Self {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkAcceptorTransport<Listener, Builder> {
+    pub fn new(builder: Builder) -> Self {
         let stop_semaphore = StoppedSemaphore::new();
         Self {
             manager: NetworkConnectionManager::new(),
             listener_thread: None,
-            stop_semaphore: stop_semaphore
+            stop_semaphore: stop_semaphore,
+            _listener: PhantomData,
+            builder: builder
         }
     }
 }
 
-impl Transport for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> Transport for NetworkAcceptorTransport<Listener, Builder> {
     fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.manager.send(message, flags)
     }
@@ -404,10 +404,10 @@ impl Transport for TCPAcceptorTransport {
     }
 }
 
-impl AcceptorTransport for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> AcceptorTransport for NetworkAcceptorTransport<Listener, Builder> {
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
         if let TransportMethod::Network(addr) = target {
-            let listener = TCPConnectionListener::bind(addr, self.manager.get_peers())?;
+            let listener: NetworkConnectionListener<Listener, Builder> = NetworkConnectionListener::bind(self.builder.clone(), addr, self.manager.get_peers())?;
             let stop_semaphore = self.stop_semaphore.clone();
             self.listener_thread = Some(thread::spawn(move || {listener.main_loop(stop_semaphore)}));
             Ok(None)
@@ -417,7 +417,7 @@ impl AcceptorTransport for TCPAcceptorTransport {
     }
 }
 
-impl Drop for TCPAcceptorTransport {
+impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> Drop for NetworkAcceptorTransport<Listener, Builder> {
     fn drop(&mut self) {
         self.stop_semaphore.stop();
         self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});

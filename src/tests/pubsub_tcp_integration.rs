@@ -41,10 +41,10 @@ impl TryFrom<Buffer> for TestingStruct {
 
 #[test]
 fn simple_pub_sub_tcp_test() {
-    let mut subscriber1 = model::pubsub::SubscriberSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut subscriber2 = model::pubsub::SubscriberSocket::new(transport::network::TCPInitiatorTransport::new());
-    let mut publisher1 = model::pubsub::PublisherSocket::new(transport::network::TCPAcceptorTransport::new());
-    let mut publisher2 = model::pubsub::PublisherSocket::new(transport::network::TCPAcceptorTransport::new());
+    let mut subscriber1 = model::pubsub::SubscriberSocket::new(transport::network::tcp::InitiatorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut subscriber2 = model::pubsub::SubscriberSocket::new(transport::network::tcp::InitiatorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut publisher1 = model::pubsub::PublisherSocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut publisher2 = model::pubsub::PublisherSocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
 
     publisher1.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46000))).unwrap();
     publisher2.bind(core::TransportMethod::Network(std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127,0,0,1)), 46001))).unwrap();
