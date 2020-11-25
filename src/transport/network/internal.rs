@@ -51,15 +51,15 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
 {
     type Stream: NetworkStream;
 
-    fn connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
+    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
 
-    fn accept_connection(&self, sa: (Self::Stream, SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
+    fn accept_connection(&self, sa: (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError>;
 
-    fn manager_connect(&self, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
+    fn manager_connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.connect(addr)?)
     }
 
-    fn manager_accept_connection(&self, stream: Self::Stream, addr: SocketAddr) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
+    fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketError> {
         stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.accept_connection((stream, addr))?)
     }
 }
@@ -81,15 +81,15 @@ impl NetworkConnectionManagerPeers {
 
     pub fn connect<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: NetworkAddress) -> Result<PeerId, ConnectorError> {
         if !self.is_already_connected(&address.get_address()) {
-            self.connect_internal(builder, address.get_address())
+            self.connect_internal(builder, address)
         } else {
             Err(ConnectorError::AlreadyConnected)
         }
     }
 
-    pub fn accept_connection<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, SocketAddr)) -> Result<PeerId, ConnectorError> {
-        match builder.manager_accept_connection(stream, addr) {
-            Ok(connection) => self.commit_onnection(connection, addr),
+    pub fn accept_connection<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, NetworkAddress)) -> Result<PeerId, ConnectorError> {
+        match builder.manager_accept_connection(stream, addr.clone()) {
+            Ok(connection) => self.commit_onnection(connection, addr.get_address()),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
     }
@@ -156,9 +156,9 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    fn connect_internal<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: SocketAddr) -> Result<PeerId, ConnectorError> {
-        match builder.manager_connect(address) {
-            Ok(connection) => self.commit_onnection(connection, address),
+    fn connect_internal<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: NetworkAddress) -> Result<PeerId, ConnectorError> {
+        match builder.manager_connect(address.clone()) {
+            Ok(connection) => self.commit_onnection(connection, address.get_address()),
             Err(_) => Err(ConnectorError::CouldNotConnect)
         }
     }
@@ -337,9 +337,9 @@ impl<Listener: NetworkListener, Builder: NetworkStreamConnectionBuilder<Stream=L
         loop { 
             loop {
                 match self.listener.accept() {
-                    Ok(incoming) => {
+                    Ok((stream, incoming_addr)) => {
                         let mut manager = self.manager.lock().unwrap();
-                        manager.accept_connection(self.builder.clone(), incoming).unwrap();
+                        manager.accept_connection(self.builder.clone(), (stream, NetworkAddress::from_socket_addr(incoming_addr))).unwrap();
                         sleeper.reset();
                     },
                     Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
