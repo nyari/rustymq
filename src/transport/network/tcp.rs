@@ -1,5 +1,6 @@
 use super::internal::*;
 use core::socket::{SocketError};
+use core::transport::{NetworkAddress};
 
 use std::net;
 use std::io;
@@ -70,7 +71,7 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = net::TcpStream;
 
-    fn connect(&self, addr: net::SocketAddr) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
         let stream = net::TcpStream::connect(addr)?;
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
@@ -78,7 +79,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }
 
-    fn accept_connection(&self, (stream, _addr): (net::TcpStream, net::SocketAddr)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
+    fn accept_connection(&self, (stream, _addr): (net::TcpStream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketError> {
         stream.set_nonblocking(true)?;
         stream.set_write_timeout(None)?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
