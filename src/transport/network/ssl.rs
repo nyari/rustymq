@@ -1,9 +1,10 @@
 use super::internal::*;
 
-use openssl::ssl::{SslMethod, SslConnector, SslStream};
+use openssl::ssl::{SslMethod, SslConnector, SslStream, HandshakeError, SslAcceptorBuilder};
 use std::net::TcpStream;
 
 use core::socket::{SocketError};
+use core::transport::{NetworkAddress};
 
 use std::net;
 use std::io;
@@ -13,6 +14,13 @@ const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 
 impl NetworkStream for SslStream<net::TcpStream> {}
 
+struct SslListener {
+    acceptor_builder: SslAcceptorBuilder
+}
+
+impl NetworkListener for SslListeter {
+
+}
 // impl NetworkListener for net::TcpListener {
 //     type Stream = net::TcpStream;
 
@@ -34,11 +42,6 @@ impl NetworkStream for SslStream<net::TcpStream> {}
 //     #[inline]
 //     fn accept(&self) -> io::Result<(Self::Stream, net::SocketAddr)> {
 //         self.accept()
-//     }
-
-//     #[inline]
-//     fn incoming(&self) -> net::Incoming<'_> {
-//         self.incoming()
 //     }
 
 //     #[inline]
@@ -78,16 +81,23 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = SslStream<net::TcpStream>;
 
-    fn connect(&self, addr: net::SocketAddr) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
-        let stream = net::TcpStream::connect(addr)?;
-        stream.set_nonblocking(true)?;
-        stream.set_write_timeout(None)?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        
-        Ok(stream::ReadWriteStreamConnection::new(stream))
+    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
+        let dns_address = addr.get_dns().ok_or(SocketError::MissingDNSDomain)?;
+        let stream = net::TcpStream::connect(addr.get_address())?;
+
+        match self.connector.connect(dns_address.as_str(), stream) {
+            Ok(mut ssl_stream) => { 
+                let stream_mut_ref = ssl_stream.get_mut();
+                stream_mut_ref.set_nonblocking(true)?;
+                stream_mut_ref.set_write_timeout(None)?;
+                stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+                Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
+            }
+            Err(_) => Err(SocketError::HandshakeFailed)
+        }
     }
 
-    fn accept_connection(&self, (stream, _addr): (Self::Stream, net::SocketAddr)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
+    fn accept_connection(&self, (stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }
 }

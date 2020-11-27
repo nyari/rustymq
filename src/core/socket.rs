@@ -29,7 +29,9 @@ pub enum SocketError {
     UnknownDataFormatReceived,
     Timeout,
     IncompatiblePeer,
-    UnsupportedOpFlag(OpFlag)
+    HandshakeFailed,
+    UnsupportedOpFlag(OpFlag),
+    MissingDNSDomain
 }
 
 #[derive(Debug)]
