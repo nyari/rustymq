@@ -1,10 +1,12 @@
 use super::internal::*;
 
-use openssl::ssl::{SslMethod, SslConnector, SslStream, HandshakeError, SslAcceptorBuilder};
-use std::net::TcpStream;
+use openssl::ssl::{SslMethod, SslConnector, SslStream, SslAcceptor, HandshakeError, SslAcceptorBuilder};
+use std::net::{TcpStream, SocketAddr};
 
 use core::socket::{SocketError};
 use core::transport::{NetworkAddress};
+
+use std::sync::Arc;
 
 use std::net;
 use std::io;
@@ -14,56 +16,84 @@ const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 
 impl NetworkStream for SslStream<net::TcpStream> {}
 
-struct SslListener {
-    acceptor_builder: SslAcceptorBuilder
+pub struct StreamListener {
+    socket: net::TcpListener,
+    acceptor: SslAcceptor
 }
 
-impl NetworkListener for SslListeter {
-
+impl StreamListener {
+    pub fn new(socket: net::TcpListener, acceptor: SslAcceptor) -> Self {
+        Self {
+            socket: socket,
+            acceptor: acceptor
+        }
+    }
 }
-// impl NetworkListener for net::TcpListener {
-//     type Stream = net::TcpStream;
 
-//     #[inline]
-//     fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self> {
-//         net::TcpListener::bind(addr)
-//     }
+impl NetworkListener for StreamListener {
+    type Stream = SslStream<net::TcpStream>;
 
-//     #[inline]
-//     fn local_addr(&self) -> io::Result<net::SocketAddr> {
-//         self.local_addr()
-//     }
+    #[inline]
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.socket.local_addr()
+    }
 
-//     #[inline]
-//     fn try_clone(&self) -> io::Result<Self> {
-//         self.try_clone()
-//     }
+    fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self::new(self.socket.try_clone()?, self.acceptor.clone()))
+    }
 
-//     #[inline]
-//     fn accept(&self) -> io::Result<(Self::Stream, net::SocketAddr)> {
-//         self.accept()
-//     }
+    #[inline]
+    fn accept(&self) -> io::Result<(Self::Stream, SocketAddr)> {
+        let acceptor = self.acceptor.clone();
+        let (stream, addr) = self.socket.accept()?;
+        match acceptor.accept(stream) {
+            Ok(ssl_stream) => Ok((ssl_stream, addr)),
+            Err(_) => Err(io::Error::new(io::ErrorKind::ConnectionRefused, "SSL Handshake failed"))
+        }
+    }
 
-//     #[inline]
-//     fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-//         self.set_ttl(ttl)
-//     }
+    #[inline]
+    fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.socket.set_ttl(ttl)
+    }
 
-//     #[inline]
-//     fn ttl(&self) -> io::Result<u32> {
-//         self.ttl()
-//     }
+    #[inline]
+    fn ttl(&self) -> io::Result<u32> {
+        self.socket.ttl()
+    }
 
-//     #[inline]
-//     fn take_error(&self) -> io::Result<Option<io::Error>> {
-//         self.take_error()
-//     }
+    #[inline]
+    fn take_error(&self) -> io::Result<Option<io::Error>> {
+        self.socket.take_error()
+    }
 
-//     #[inline]
-//     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
-//         self.set_nonblocking(nonblocking)
-//     }
-// }
+    #[inline]
+    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.socket.set_nonblocking(nonblocking)
+    }
+}
+
+#[derive(Clone)]
+pub struct StreamListenerBuilder {
+    acceptor_builder: Arc<dyn Fn() -> SslAcceptorBuilder + Sync + Send>
+}
+
+impl StreamListenerBuilder {
+    pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptorBuilder + Sync + Send >) -> Self {
+        Self {
+            acceptor_builder: acceptor_builder
+        }
+    }
+}
+
+impl NetworkListenerBuilder for StreamListenerBuilder {
+    type Listener = StreamListener;
+    fn bind<A: net::ToSocketAddrs>(&self, addr: A) -> io::Result<Self::Listener> {
+        let listener = net::TcpListener::bind(addr)?;
+        let acceptor = (self.acceptor_builder)().build();
+        Ok(StreamListener::new(listener, acceptor))
+    }
+}
 
 #[derive(Clone)]
 pub struct StreamConnectionBuilder {
@@ -103,5 +133,5 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 }
 
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
-//pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
-//pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamConnectionBuilder>;
+pub type ConnectionListener = NetworkConnectionListener<StreamListener, StreamConnectionBuilder>;
+pub type AcceptorTransport = NetworkAcceptorTransport<StreamListener, StreamListenerBuilder, StreamConnectionBuilder>;
