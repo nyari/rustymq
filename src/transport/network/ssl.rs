@@ -127,7 +127,11 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         }
     }
 
-    fn accept_connection(&self, (stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
+    fn accept_connection(&self, (mut stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
+        let stream_mut_ref = stream.get_mut();
+        stream_mut_ref.set_nonblocking(true)?;
+        stream_mut_ref.set_write_timeout(None)?;
+        stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }
 }
