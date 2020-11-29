@@ -35,6 +35,12 @@ impl NetworkAddress {
     pub fn get_dns(&self) -> Option<String> {
         self.dns.clone()
     }
+
+    pub fn get_dns_name(&self) -> Option<String> {
+        self.dns.as_ref().map(|dns| {
+            dns.split(":").next().unwrap().to_string()
+        })
+    }
 }
 
 impl ToSocketAddrs for NetworkAddress {

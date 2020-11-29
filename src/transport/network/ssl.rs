@@ -75,11 +75,11 @@ impl NetworkListener for StreamListener {
 
 #[derive(Clone)]
 pub struct StreamListenerBuilder {
-    acceptor_builder: Arc<dyn Fn() -> SslAcceptorBuilder + Sync + Send>
+    acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send>
 }
 
 impl StreamListenerBuilder {
-    pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptorBuilder + Sync + Send >) -> Self {
+    pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send >) -> Self {
         Self {
             acceptor_builder: acceptor_builder
         }
@@ -90,7 +90,8 @@ impl NetworkListenerBuilder for StreamListenerBuilder {
     type Listener = StreamListener;
     fn bind<A: net::ToSocketAddrs>(&self, addr: A) -> io::Result<Self::Listener> {
         let listener = net::TcpListener::bind(addr)?;
-        let acceptor = (self.acceptor_builder)().build();
+        listener.set_nonblocking(true).unwrap();
+        let acceptor = (self.acceptor_builder)();
         Ok(StreamListener::new(listener, acceptor))
     }
 }
@@ -112,7 +113,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = SslStream<net::TcpStream>;
 
     fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
-        let dns_address = addr.get_dns().ok_or(SocketError::MissingDNSDomain)?;
+        let dns_address = addr.get_dns_name().ok_or(SocketError::MissingDNSDomain)?;
         let stream = net::TcpStream::connect(addr.get_address())?;
 
         match self.connector.connect(dns_address.as_str(), stream) {
@@ -123,7 +124,10 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
             }
-            Err(_) => Err(SocketError::HandshakeFailed)
+            Err(err) => {
+                eprintln!("SSL connection failed: {}", err);
+                Err(SocketError::HandshakeFailed)
+            }
         }
     }
 
