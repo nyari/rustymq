@@ -1,16 +1,14 @@
 pub use super::super::*;
 
-use openssl::ssl::{SslMethod, SslConnector, SslStream, SslAcceptor, HandshakeError, SslAcceptorBuilder, SslFiletype, SslVerifyMode};
+use openssl::ssl::{SslMethod, SslConnector, SslAcceptor, SslVerifyMode};
 use openssl;
 
-use core::socket::{Socket, SocketError, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket,
-                   QueryTypedError, ReceiveTypedError, SendTypedError};
+use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
 use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
 use core::serializer;
 use core::transport::NetworkAddress;
-use core::message::{TypedMessage, Buffer, Message, MessageMetadata};
-use std::collections::{HashMap};
-use std::sync::{Arc, Mutex};
+use core::message::{TypedMessage, Buffer, Message};
+use std::sync::{Arc};
 
 use std::convert::{TryFrom};
 

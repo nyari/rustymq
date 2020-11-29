@@ -1,7 +1,7 @@
 use super::internal::*;
 
-use openssl::ssl::{SslMethod, SslConnector, SslStream, SslAcceptor, HandshakeError, SslAcceptorBuilder};
-use std::net::{TcpStream, SocketAddr};
+use openssl::ssl::{SslConnector, SslStream, SslAcceptor};
+use std::net::{SocketAddr};
 
 use core::socket::{SocketError};
 use core::transport::{NetworkAddress};
