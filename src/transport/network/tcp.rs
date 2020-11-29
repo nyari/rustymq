@@ -14,11 +14,6 @@ impl NetworkListener for net::TcpListener {
     type Stream = net::TcpStream;
 
     #[inline]
-    fn bind<A: net::ToSocketAddrs>(addr: A) -> io::Result<Self> {
-        net::TcpListener::bind(addr)
-    }
-
-    #[inline]
     fn local_addr(&self) -> io::Result<net::SocketAddr> {
         self.local_addr()
     }
@@ -31,11 +26,6 @@ impl NetworkListener for net::TcpListener {
     #[inline]
     fn accept(&self) -> io::Result<(Self::Stream, net::SocketAddr)> {
         self.accept()
-    }
-
-    #[inline]
-    fn incoming(&self) -> net::Incoming<'_> {
-        self.incoming()
     }
 
     #[inline]
@@ -56,6 +46,26 @@ impl NetworkListener for net::TcpListener {
     #[inline]
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         self.set_nonblocking(nonblocking)
+    }
+}
+
+#[derive(Clone)]
+pub struct StreamListenerBuilder {
+
+}
+
+impl StreamListenerBuilder {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl NetworkListenerBuilder for StreamListenerBuilder {
+    type Listener = net::TcpListener;
+    fn bind<A: net::ToSocketAddrs>(&self, addr: A) -> io::Result<Self::Listener> {
+        let listener = net::TcpListener::bind(addr)?;
+        listener.set_nonblocking(true).unwrap();
+        Ok(listener)
     }
 }
 
@@ -89,4 +99,4 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
 pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
-pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamConnectionBuilder>;
+pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamListenerBuilder, StreamConnectionBuilder>;

@@ -46,7 +46,7 @@ impl TryFrom<Buffer> for TestingStruct {
 #[test]
 fn simple_req_rep_tcp_test() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new(), transport::network::tcp::StreamListenerBuilder::new()));
 
     replier.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45321".to_string()).unwrap())).unwrap();
     requestor.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45321".to_string()).unwrap())).unwrap();
@@ -66,7 +66,7 @@ fn simple_req_rep_tcp_test() {
 #[test]
 fn stress_simple_req_rep_tcp_test() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new(), transport::network::tcp::StreamListenerBuilder::new()));
 
     replier.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:48000".to_string()).unwrap())).unwrap();
     requestor.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:48000".to_string()).unwrap())).unwrap();
@@ -115,7 +115,7 @@ fn stress_simple_req_rep_tcp_test() {
 #[test]
 fn simple_req_rep_tcp_test_disconnected_before_first_send() {
     let mut requestor = model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new()));
+    let mut replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(transport::network::tcp::StreamConnectionBuilder::new(), transport::network::tcp::StreamListenerBuilder::new()));
 
     replier.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();
     requestor.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();
