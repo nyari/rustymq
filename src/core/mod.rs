@@ -16,4 +16,7 @@ pub use self::message::ConversationId;
 pub use self::message::PeerId;
 pub use self::message::Part;
 
+pub use self::socket::*;
+
 pub use self::transport::TransportMethod;
+pub use self::transport::NetworkAddress;
