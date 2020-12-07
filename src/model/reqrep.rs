@@ -167,7 +167,7 @@ impl<T> OutwardSocket for RequestSocket<T>
     where T: InitiatorTransport
 {
     fn send(&mut self, message:RawMessage, flags:OpFlag) -> Result<MessageMetadata, SocketError> {
-        let request_message = message.commit_conversation_model_id(REQUEST_MODELID);
+        let request_message = message.commit_communication_model_id(REQUEST_MODELID);
         let metadata = request_message.metadata().clone();
         match self.channel.send(self.tracker.initiate_new_conversation(self.tracker.apply_single_peer_if_needed(request_message)?)?, flags) {
             Ok(()) => Ok(metadata),
@@ -251,7 +251,7 @@ impl<T> OutwardSocket for ReplySocket<T>
     where T: AcceptorTransport {
 
     fn send(&mut self, message:RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let processed_message = self.tracker.close_conversation(message)?.commit_conversation_model_id(REPLY_MODELID);
+        let processed_message = self.tracker.close_conversation(message)?.commit_communication_model_id(REPLY_MODELID);
         let message_metadata = processed_message.metadata().clone();
         self.channel.send(processed_message, flags)?;
         Ok(message_metadata)

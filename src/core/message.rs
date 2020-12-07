@@ -1,3 +1,10 @@
+//! # Message module
+//! ## Summary
+//! Datastructures, trait definitions for Message handling within RustyMQ
+//! ## Details
+//! This module containts the definition of Messages, which are a core concept of RustyMQ.
+//! All the datastructures, traits and enums needed to compose messages for sending and then
+//! receiving are defined here
 use std;
 use std::convert::{TryInto, TryFrom};
 use std::ops::{Deref, DerefMut};
@@ -7,42 +14,89 @@ use core::serializer;
 use core::util::Identifier;
 pub use core::serializer::Buffer;
 
+/// # Multipart message part identifier
+/// Enum for tracking multipart messages
+/// ## Description
+/// Enum to track multiplart message sequences more easily. Although the iteration of these should
+/// be handled manually by the user
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(PartialEq)]
 #[derive(Eq)]
 #[derive(Hash)]
 pub enum Part {
+    /// Signaling this is an intermediate message of a multipart message seqence and the index
     Intermediate(u32),
+    /// Signaling this is a final message of a multipart message sequence and the index
     Final(u32),
+    /// Signaling this is a final *empty* message of a multipart message sequence
     Closing(u32)
 }
 
+/// # Multipart message part tracking error
+/// Error enum to handle errors regarding the tracking of multipart messages
 #[derive(Debug)]
 pub enum Error {
+    /// Continuation requested of a non-multipart message
     NotMultipart,
+    /// Continuation of an already closed or finalized multipart message
     AlreadyFinishedMultipart
 }
 
+/// Type definition for message identifier data structure
 pub type MessageId = Identifier;
+/// Type definition for conversation identifier data structure
 pub type ConversationId = Identifier;
+/// Type definition for conversation peer identifier data structure
 pub type PeerId = Identifier;
+/// Type definition for the identifier for the different communication models. For details see [super::super::model]:here
 pub type CommunicationModelId = u16;
 
+/// # Metadata for every ZeroMQ Message
+/// This datastructure contains data for tracking, and routing messages between links and the built
+/// up communication network
+/// ## Conained metadata
+/// * Randomly generated message indentifier for tracking messages
+/// * Randomly generated conversation identifier for tracking conversations
+/// * Model ID handled by the communication models used. For defails see [super::super::model]:here
+/// * Peer ID for identifying the peer the message is addressed to or received from. Optionality is dependent on the communication model used.
+///   For details see [super::super::model]:here
+/// * Optional multipart message indexing
 #[derive(Clone)]
 #[derive(PartialEq)]
 #[derive(Eq)]
 #[derive(Hash)]
 #[derive(Debug)]
 pub struct MessageMetadata {
+    /// Message identifier for tracking a message. By default it is randomly generated
     messageid: MessageId,
+    /// Conversation identifier for tracking a conversation. By defailt it is randomly generated
     conversationid: ConversationId,
+    /// Model id for identification of the communication model used. For details see [super::super::model]:here
     modelid: Option<CommunicationModelId>,
+    /// Peer id for idetification of the peer the message is addressed to or received from
     peerid: Option<PeerId>,
+    /// Part tracker for multipart message tracking
     part: Option<Part>
 }
 
 impl MessageMetadata {
+    /// Create a new randomly generated MessageMetadata instance
+    /// * Message identifier randomly generated
+    /// * Conversation identifier randomly generated
+    /// * Model identifier set to None
+    /// * Peer identifier set to None
+    /// * Part tracker set to None
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::MessageMetadata;
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    ///
+    /// assert!(std::matches!(metadata.peer_id(), None));
+    /// assert!(std::matches!(metadata.part(), None));
+    /// # }
+    /// ```
     pub fn new() -> Self {
         Self {
             messageid: MessageId::new_random(),
@@ -53,6 +107,23 @@ impl MessageMetadata {
         }
     }
 
+    /// Create a new randomly generated MessageMetadata instance for tracking a multipart message
+    /// * Message identifier randomly generated
+    /// * Conversation identifier randomly generated
+    /// * Model identifier set to None
+    /// * Peer identifier set to None
+    /// * Part tracker set to Part::Intermediate(0)
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::MessageMetadata;
+    /// # use rustymq::core::Part;
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new_multipart();
+    ///
+    /// assert!(std::matches!(metadata.peer_id(), None));
+    /// assert!(std::matches!(metadata.part(), Some(Part::Intermediate(0))));
+    /// # }
+    /// ```
     pub fn new_multipart() -> Self {
         Self {
             part:Some(Part::Intermediate(0)),
@@ -60,6 +131,21 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance from current one with a peer identifier applied
+    /// 
+    /// This method will commit the peer identifier given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part, PeerId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.peer_id(), None));
+    /// 
+    /// let peer_id = PeerId::new(5);
+    /// let metadata = metadata.applied_peer_id(peer_id.clone());
+    /// assert!(std::matches!(metadata.peer_id(), Some(peer_id)));
+    /// # }
+    /// ```
     pub fn applied_peer_id(self, id:PeerId) -> Self {
         Self {
             peerid:Some(id),
@@ -67,6 +153,21 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance from current one with multipart message part tracker
+    /// 
+    /// This method will set the part tracking of the metadata to Some(Part::Intermediate(0)) while
+    /// retaining all other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.part(), None));
+    /// 
+    /// let metadata = metadata.started_multipart();
+    /// assert!(std::matches!(metadata.part(), Some(Part::Intermediate(0))));
+    /// # }
+    /// ```
     pub fn started_multipart(self) -> Self {
         Self {
             part: Some(Part::Intermediate(0)),
@@ -74,52 +175,84 @@ impl MessageMetadata {
         }
     }
 
-    pub fn continue_exhange(self) -> Self {
-        if !self.is_multipart() {
-            Self {
-                messageid: MessageId::new_random(),
-                part: None,
-                ..self
-            }
-        } else {
-            Self {
-                messageid: MessageId::new_random(),
-                ..self
-            }
+    /// Generate new instance for continuing an already existing conversation
+    /// 
+    /// This method will retain all fields of the metadata except for the message identifier
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let original = MessageMetadata::new();
+    /// let original_converstion_id = original.conversation_id().clone();
+    /// let original_clone = original.clone();
+    /// 
+    /// let continuation = original.continue_exchange();
+    /// assert_ne!(original_clone.message_id(), continuation.message_id());
+    /// assert_eq!(original_clone.conversation_id(), continuation.conversation_id());
+    /// assert_eq!(original_clone.peer_id(), continuation.peer_id());
+    /// assert_eq!(original_clone.part(), continuation.part());
+    /// # }
+    /// ```
+    pub fn continue_exchange(self) -> Self {
+        Self {
+            messageid: MessageId::new_random(),
+            ..self
         }
     }
 
-    pub fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
+    /// Generate new instace with a new communication model id. (Only needed for custom communication model implementation)
+    /// 
+    /// This is only needed in case you are implementing your own communication model. It will retain all fields of the metadata
+    /// except for the communication model identifier given as the parameter
+    pub fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
         Self {
             modelid: Some(model_id),
             ..self
         }
     }
-
+    
+    /// Qurey the stored message id
     pub fn message_id(&self) -> &MessageId {
         &self.messageid
     }
 
+    /// Query the stored convesation id
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversationid
     }
 
+    /// Query the stored communication model id (Only needed for custom communication model implementation)
     pub fn communication_model_id(&self) -> &Option<CommunicationModelId> {
         &self.modelid
     }
 
+    /// Query the stored peer identifier (None if not set)
     pub fn peer_id(&self) -> &Option<PeerId> {
         &self.peerid
     }
 
+    /// Query whether the message is multipart
     pub fn is_multipart(&self) -> bool {
         self.part.is_none()
     }
 
+    /// Query the part tracker (None if not set)
     pub fn part(&self) -> &Option<Part> {
         &self.part
     }
 
+    /// Generate new instance for multipart message metadata with advancing the part id by one
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let original = MessageMetadata::new_multipart();
+    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// 
+    /// let result = original.next_multipart().unwrap();
+    /// assert!(std::matches!(result.part(), Some(Part::Intermediate(1))));
+    /// # }
+    /// ```
     pub fn next_multipart(self) -> Result<Self, Error> {
         match self.part {
             Some(Part::Intermediate(part)) => Ok(Self {
@@ -131,6 +264,18 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance for multipart message metadata without advancing the part id and changing it to final
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let original = MessageMetadata::new_multipart();
+    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// 
+    /// let result = original.as_final_multipart().unwrap();
+    /// assert!(std::matches!(result.part(), Some(Part::Final(0))));
+    /// # }
+    /// ```
     pub fn as_final_multipart(self) -> Result<Self, Error> {
         match self.part {
             Some(Part::Intermediate(part)) => Ok(Self {
@@ -142,6 +287,18 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance for multipart message metadata with advancing the part id and changing it to final
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let original = MessageMetadata::new_multipart();
+    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// 
+    /// let result = original.as_final_multipart().unwrap();
+    /// assert!(std::matches!(result.part(), Some(Part::Final(0))));
+    /// # }
+    /// ```
     pub fn final_multipart(self) -> Result<Self, Error> {
         match self.part {
             Some(Part::Intermediate(part)) => Ok(Self {
@@ -153,6 +310,18 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance for multipart message metadata without advancing the part id and chaning it to closing
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # fn main() {
+    /// let original = MessageMetadata::new_multipart();
+    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// 
+    /// let result = original.close_multipart().unwrap();
+    /// assert!(std::matches!(result.part(), Some(Part::Closing(0))));
+    /// # }
+    /// ```
     pub fn close_multipart(self) -> Result<Self, Error> {
         match self.part {
             Some(Part::Intermediate(part)) => Ok(Self {
@@ -213,19 +382,19 @@ pub trait Message: Sized
 
     fn into_parts(self) -> (MessageMetadata, Self::Payload);
 
-    fn commit_conversation_model_id(self, model_id: CommunicationModelId) -> Self {
-        self.mutated_metadata(|metadata| {metadata.commit_conversation_model_id(model_id)})
+    fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
+        self.mutated_metadata(|metadata| {metadata.commit_communication_model_id(model_id)})
     }
 
-    fn continue_exhange(self, payload: Self::Payload) -> Self where Self: Sized {
+    fn continue_exchange(self, payload: Self::Payload) -> Self where Self: Sized {
         Self::with_metadata(self.metadata()
                                 .clone()
-                                .continue_exhange(),
+                                .continue_exchange(),
                             payload)
     }
 
     fn continue_exchange_metadata(self, meta: MessageMetadata) -> Self where Self: Sized {
-        Self::with_metadata(meta.continue_exhange(),
+        Self::with_metadata(meta.continue_exchange(),
                             self.into_payload())
     }
 

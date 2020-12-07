@@ -170,7 +170,7 @@ impl<T> OutwardSocket for PublisherSocket<T>
     where T: AcceptorTransport {
 
     fn send(&mut self, message:RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let processed_message = message.commit_conversation_model_id(PUBLISHER_MODELID);
+        let processed_message = message.commit_communication_model_id(PUBLISHER_MODELID);
         let message_metadata = processed_message.metadata().clone();
         for peer_id in self.channel.query_connected_peers().iter() {
             self.channel.send(processed_message.clone().apply_peer_id(peer_id.clone()), flags.clone())?;

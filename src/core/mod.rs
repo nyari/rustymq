@@ -1,5 +1,7 @@
+//! # Core module
+//! Core datastructures, traits and enums for use in RustyMQ
+
 pub mod message;
-pub mod buffer;
 pub mod socket;
 pub mod transport;
 pub mod serializer;
