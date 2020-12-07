@@ -334,81 +334,89 @@ impl MessageMetadata {
     }
 }
 
+/// RustyMQ Message Trait for a universal interface for messages with a given associated payload type
 pub trait Message: Sized
 {
+    /// Associated type of the payload type
     type Payload;
 
+    /// Create a new message with a the given payload
     fn new(payload: Self::Payload) -> Self;
-    fn with_metadata(meta: MessageMetadata, payload: Self::Payload) -> Self;
 
+    /// Create a new message with the given metadata and payload
+    fn with_metadata(metadata: MessageMetadata, payload: Self::Payload) -> Self;
+
+    /// Query the metadata stored in the message
     fn metadata(&self) -> &MessageMetadata;
-    fn yield_metadata(&mut self) -> MessageMetadata;
+
+    /// Consume message and return metadata
     fn into_metadata(self) -> MessageMetadata;
+
+    /// Query the payload of the message
+    fn payload(&self) -> &Self::Payload;
+
+    /// Consume message and return payload
+    fn into_payload(self) -> Self::Payload;
+
+    /// Consume message and return metadata and payload
+    fn into_parts(self) -> (MessageMetadata, Self::Payload);
+
+    /// Generate new instance with mutated metadata but keeping the payload.
     fn mutated_metadata<Mutator: Fn(MessageMetadata) -> MessageMetadata>(self, mutator: Mutator) -> Self {
         let (meta, payload) = self.into_parts();
         Self::with_metadata(mutator(meta), payload)
     }
 
-    fn apply_peer_id(self, peer_id: PeerId) -> Self {
-        self.mutated_metadata(|x| x.applied_peer_id(peer_id))
-    }
-
+    /// Query the message identifier from the stored metadata
     fn message_id(&self) -> &MessageId {
         self.metadata().message_id()
     }
 
+    /// Query the conversation identifier from the stored metadata
     fn conversation_id(&self) -> &ConversationId {
         self.metadata().conversation_id()
     }
 
+    /// Query the communication model identifier from the stored metadata if present
     fn communication_model_id(&self) -> &Option<CommunicationModelId> {
         self.metadata().communication_model_id()
     }
 
+    /// Query the peer identifier from the stored metadata if present
     fn peer_id(&self) -> &Option<PeerId> {
         self.metadata().peer_id()
     }
 
+    /// Query if the stored metadata is multipart
     fn is_multipart(&self) -> bool {
         self.metadata().is_multipart()
     }
 
+    /// Query if part tracker from the stored metadata
     fn part(&self) -> &Option<Part> {
         self.metadata().part()
     }
 
-    fn payload(&self) -> &Self::Payload;
-    fn into_payload(self) -> Self::Payload;
+    /// Generate new instance with new peer identifier in the stored metadata but keeping the payload
+    fn apply_peer_id(self, peer_id: PeerId) -> Self {
+        self.mutated_metadata(|x| x.applied_peer_id(peer_id))
+    }
 
-    fn into_parts(self) -> (MessageMetadata, Self::Payload);
-
+    /// Generate new instance with new peer identifier in the stored metadata but keeping the payload
     fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
         self.mutated_metadata(|metadata| {metadata.commit_communication_model_id(model_id)})
     }
 
+    /// Generate new instance by continuing metadata exchange and with the given payload
     fn continue_exchange(self, payload: Self::Payload) -> Self where Self: Sized {
-        Self::with_metadata(self.metadata()
-                                .clone()
-                                .continue_exchange(),
-                            payload)
+        let metadata = self.into_metadata();
+        Self::with_metadata(metadata.continue_exchange(), payload)
     }
 
+    /// Generate new instance by keeping payload and continuing metadata exchange
     fn continue_exchange_metadata(self, meta: MessageMetadata) -> Self where Self: Sized {
         Self::with_metadata(meta.continue_exchange(),
                             self.into_payload())
-    }
-
-    fn multipart(meta: &mut MessageMetadata, payload: Self::Payload) -> Self where Self: Sized {
-        let original_metadata = meta.clone();
-        let result = Self::with_metadata(original_metadata, payload);
-        *meta = meta.clone().next_multipart().unwrap();
-        result
-    }
-
-    fn into_final_multipart(self) -> Self where Self: Sized {
-        let (meta, payload) = self.into_parts();
-        Self::with_metadata(meta.as_final_multipart().unwrap(),
-                            payload)
     }
 }
 
@@ -439,10 +447,6 @@ impl Message for RawMessage {
 
     fn metadata(&self) -> &MessageMetadata {
         &self.meta
-    }
-
-    fn yield_metadata(&mut self) -> MessageMetadata {
-        std::mem::replace(&mut self.meta, MessageMetadata::new())
     }
 
     fn into_metadata(self) -> MessageMetadata {
@@ -502,10 +506,6 @@ impl<T> Message for TypedMessage<T>
 
     fn metadata(&self) -> &MessageMetadata {
         &self.meta
-    }
-
-    fn yield_metadata(&mut self) -> MessageMetadata {
-        std::mem::replace(&mut self.meta, MessageMetadata::new())
     }
 
     fn into_metadata(self) -> MessageMetadata {
