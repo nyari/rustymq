@@ -25,18 +25,112 @@ pub use core::serializer::Buffer;
 #[derive(Eq)]
 #[derive(Hash)]
 pub enum Part {
+    /// Signaling this is a single message
+    Single,
     /// Signaling this is an intermediate message of a multipart message seqence and the index
     Intermediate(u32),
     /// Signaling this is a final message of a multipart message sequence and the index
-    Final(u32),
-    /// Signaling this is a final *empty* message of a multipart message sequence
-    Closing(u32)
+    Final(u32)
+}
+
+impl Part {
+    /// Generate new instance for a single message without multiple aprts
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let original = Part::single();
+    /// assert!(std::matches!(original, Part::Single));
+    /// # }
+    /// ```
+    pub fn single() -> Self {
+        Part::Single
+    }
+
+    /// Generate a new instance for trackinga multipart message
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let original = Part::start_multipart();
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// # }
+    /// ```
+    pub fn start_multipart() -> Self {
+        Part::Intermediate(0)
+    }
+
+    /// Query if part is multipart
+    pub fn is_multipart(&self) -> bool {
+        !std::matches!(self, Part::Single)
+    }
+
+    /// Generate new instance for multipart message metadata with advancing the part id by one
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let original = Part::start_multipart();
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// 
+    /// let result = original.next_multipart().unwrap();
+    /// assert!(std::matches!(result, Part::Intermediate(1)));
+    /// # }
+    /// ```
+    pub fn next_multipart(self) -> Result<Self, PartError> {
+        match self {
+            Part::Intermediate(part) => Ok(Part::Intermediate(part + 1)),
+            Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
+            Part::Single => Err(PartError::NotMultipart)
+        }
+    }
+
+    /// Generate new instance keeping the part index but change to final message
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let original = Part::start_multipart();
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// 
+    /// let result = original.as_final_multipart().unwrap();
+    /// assert!(std::matches!(result, Part::Final(0)));
+    /// # }
+    /// ```
+    pub fn as_final_multipart(self) -> Result<Self, PartError> {
+        match self {
+            Part::Intermediate(part) => Ok(Part::Final(part)),
+            Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
+            Part::Single => Err(PartError::NotMultipart)
+        }
+    }
+
+    /// Generate new instance keeping the part index but change to final message
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let original = Part::start_multipart();
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// 
+    /// let result = original.next_final_multipart().unwrap();
+    /// assert!(std::matches!(result, Part::Final(1)));
+    /// # }
+    /// ```
+    pub fn next_final_multipart(self) -> Result<Self, PartError> {
+        match self {
+            Part::Intermediate(part) => Ok(Part::Final(part + 1)),
+            Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
+            Part::Single => Err(PartError::NotMultipart)
+        }
+    }
+
 }
 
 /// # Multipart message part tracking error
-/// Error enum to handle errors regarding the tracking of multipart messages
+/// PartError enum to handle errors regarding the tracking of multipart messages
 #[derive(Debug)]
-pub enum Error {
+pub enum PartError {
     /// Continuation requested of a non-multipart message
     NotMultipart,
     /// Continuation of an already closed or finalized multipart message
@@ -77,7 +171,7 @@ pub struct MessageMetadata {
     /// Peer id for idetification of the peer the message is addressed to or received from
     peerid: Option<PeerId>,
     /// Part tracker for multipart message tracking
-    part: Option<Part>
+    part: Part
 }
 
 impl MessageMetadata {
@@ -89,12 +183,12 @@ impl MessageMetadata {
     /// * Part tracker set to None
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::MessageMetadata;
+    /// # use rustymq::core::{MessageMetadata, Part};
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     ///
     /// assert!(std::matches!(metadata.peer_id(), None));
-    /// assert!(std::matches!(metadata.part(), None));
+    /// assert!(std::matches!(metadata.part(), Part::Single));
     /// # }
     /// ```
     pub fn new() -> Self {
@@ -103,7 +197,7 @@ impl MessageMetadata {
             conversationid: ConversationId::new_random(),
             modelid: None,
             peerid: None,
-            part: None
+            part: Part::Single
         }
     }
 
@@ -121,12 +215,12 @@ impl MessageMetadata {
     /// let metadata = MessageMetadata::new_multipart();
     ///
     /// assert!(std::matches!(metadata.peer_id(), None));
-    /// assert!(std::matches!(metadata.part(), Some(Part::Intermediate(0))));
+    /// assert!(std::matches!(metadata.part(), Part::Intermediate(0)));
     /// # }
     /// ```
     pub fn new_multipart() -> Self {
         Self {
-            part:Some(Part::Intermediate(0)),
+            part: Part::start_multipart(),
             ..Self::new()
         }
     }
@@ -162,15 +256,15 @@ impl MessageMetadata {
     /// # use rustymq::core::{MessageMetadata, Part};
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
-    /// assert!(std::matches!(metadata.part(), None));
+    /// assert!(std::matches!(metadata.part(), Part::Single));
     /// 
     /// let metadata = metadata.started_multipart();
-    /// assert!(std::matches!(metadata.part(), Some(Part::Intermediate(0))));
+    /// assert!(std::matches!(metadata.part(), Part::Intermediate(0)));
     /// # }
     /// ```
     pub fn started_multipart(self) -> Self {
         Self {
-            part: Some(Part::Intermediate(0)),
+            part: Part::start_multipart(),
             ..self
         }
     }
@@ -233,11 +327,11 @@ impl MessageMetadata {
 
     /// Query whether the message is multipart
     pub fn is_multipart(&self) -> bool {
-        self.part.is_none()
+        !std::matches!(self.part, Part::Single)
     }
 
     /// Query the part tracker (None if not set)
-    pub fn part(&self) -> &Option<Part> {
+    pub fn part(&self) -> &Part {
         &self.part
     }
 
@@ -247,21 +341,17 @@ impl MessageMetadata {
     /// # use rustymq::core::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
-    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
     /// 
     /// let result = original.next_multipart().unwrap();
-    /// assert!(std::matches!(result.part(), Some(Part::Intermediate(1))));
+    /// assert!(std::matches!(result.part(), Part::Intermediate(1)));
     /// # }
     /// ```
-    pub fn next_multipart(self) -> Result<Self, Error> {
-        match self.part {
-            Some(Part::Intermediate(part)) => Ok(Self {
-                part: Some(Part::Intermediate(part + 1)),
-                ..self
-            }),
-            Some(_) => Err(Error::AlreadyFinishedMultipart),
-            None => Err(Error::NotMultipart)
-        }
+    pub fn next_multipart(self) -> Result<Self, PartError> {
+        Ok(Self {
+            part: self.part.next_multipart()?,
+            ..self
+        })
     }
 
     /// Generate new instance for multipart message metadata without advancing the part id and changing it to final
@@ -270,21 +360,17 @@ impl MessageMetadata {
     /// # use rustymq::core::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
-    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
     /// 
     /// let result = original.as_final_multipart().unwrap();
-    /// assert!(std::matches!(result.part(), Some(Part::Final(0))));
+    /// assert!(std::matches!(result.part(), Part::Final(0)));
     /// # }
     /// ```
-    pub fn as_final_multipart(self) -> Result<Self, Error> {
-        match self.part {
-            Some(Part::Intermediate(part)) => Ok(Self {
-                part: Some(Part::Final(part)),
-                ..self
-            }),
-            Some(_) => Err(Error::AlreadyFinishedMultipart),
-            None => Err(Error::NotMultipart)
-        }
+    pub fn as_final_multipart(self) -> Result<Self, PartError> {
+        Ok(Self {
+            part: self.part.as_final_multipart()?,
+            ..self
+        })
     }
 
     /// Generate new instance for multipart message metadata with advancing the part id and changing it to final
@@ -293,44 +379,17 @@ impl MessageMetadata {
     /// # use rustymq::core::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
-    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
+    /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
     /// 
     /// let result = original.as_final_multipart().unwrap();
-    /// assert!(std::matches!(result.part(), Some(Part::Final(0))));
+    /// assert!(std::matches!(result.part(), Part::Final(0)));
     /// # }
     /// ```
-    pub fn final_multipart(self) -> Result<Self, Error> {
-        match self.part {
-            Some(Part::Intermediate(part)) => Ok(Self {
-                part: Some(Part::Final(part + 1)),
-                ..self
-            }),
-            Some(_) => Err(Error::AlreadyFinishedMultipart),
-            None => Err(Error::NotMultipart)
-        }
-    }
-
-    /// Generate new instance for multipart message metadata without advancing the part id and chaning it to closing
-    /// ## Example
-    /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
-    /// # fn main() {
-    /// let original = MessageMetadata::new_multipart();
-    /// assert!(std::matches!(original.part(), Some(Part::Intermediate(0))));
-    /// 
-    /// let result = original.close_multipart().unwrap();
-    /// assert!(std::matches!(result.part(), Some(Part::Closing(0))));
-    /// # }
-    /// ```
-    pub fn close_multipart(self) -> Result<Self, Error> {
-        match self.part {
-            Some(Part::Intermediate(part)) => Ok(Self {
-                part: Some(Part::Closing(part)),
-                ..self
-            }),
-            Some(_) => Err(Error::AlreadyFinishedMultipart),
-            None => Err(Error::NotMultipart)
-        }
+    pub fn next_final_multipart(self) -> Result<Self, PartError> {
+        Ok(Self {
+            part: self.part.next_final_multipart()?,
+            ..self
+        })
     }
 }
 
@@ -393,7 +452,7 @@ pub trait Message: Sized
     }
 
     /// Query if part tracker from the stored metadata
-    fn part(&self) -> &Option<Part> {
+    fn part(&self) -> &Part {
         self.metadata().part()
     }
 
@@ -576,16 +635,17 @@ impl<T> DerefMut for TypedMessage<T>
 impl Serializable for Part {
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         match self {
-            Part::Intermediate(value) => {serializer.serialize(&0u8); serializer.serialize(value)},
-            Part::Final(value) => {serializer.serialize(&1u8); serializer.serialize(value)},
-            Part::Closing(value) => {serializer.serialize(&2u8); serializer.serialize(value)}
+            Part::Single => {serializer.serialize(&0u8)}
+            Part::Intermediate(value) => {serializer.serialize(&1u8); serializer.serialize(value)},
+            Part::Final(value) => {serializer.serialize(&2u8); serializer.serialize(value)}
         }
     }
+
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         match deserializer.deserialize::<u8>()? {
-            0 => Ok(Part::Intermediate(deserializer.deserialize()?)),
-            1 => Ok(Part::Final(deserializer.deserialize()?)),
-            2 => Ok(Part::Closing(deserializer.deserialize()?)),
+            0 => Ok(Part::Single),
+            1 => Ok(Part::Intermediate(deserializer.deserialize()?)),
+            2 => Ok(Part::Final(deserializer.deserialize()?)),
             _ => Err(serializer::Error::DemarshallingFailed)
         }
     }
