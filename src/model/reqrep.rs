@@ -1,8 +1,8 @@
 use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, ConnectorError, SocketError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
-use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message};
+use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message, Part, PartError};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 
 const REQUEST_MODELID: u16 = 0xFFF0;
 const REPLY_MODELID: u16 = 0xFFF1; 
@@ -12,21 +12,21 @@ enum ConnTrackerError {
     NotNewPeer
 }
 
+#[derive(Debug)]
+#[derive(Clone)]
+enum ConnTrackerState {
+    RequestMessage(Part),
+    ReplyMessage(Part)
+}
+
 struct ConnectionTracker {
-    map: HashMap<PeerId, HashSet<ConversationId>>
+    map: HashMap<PeerId, HashMap<ConversationId, ConnTrackerState>>
 }
 
 impl ConnectionTracker {
     pub fn new() -> Self {
         Self {
             map: HashMap::new()
-        }
-    }
-
-    pub fn accept_new_peer(&mut self, peer_id: PeerId) -> Result<(), ConnTrackerError> {
-        match self.map.insert(peer_id, HashSet::new()) {
-            None => Ok(()),
-            _ => Err(ConnTrackerError::NotNewPeer)
         }
     }
 
@@ -54,15 +54,11 @@ impl ConnectionTracker {
         }
     }
 
-    pub fn initiate_new_conversation(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
+    pub fn handle_request_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
         match message.peer_id() {
             Some(peer_id) => match self.map.get_mut(peer_id) {
-                Some(conversation_ids) => {
-                    if conversation_ids.insert(message.conversation_id().clone()) {
-                        Ok(message)
-                    } else {
-                        Err(SocketError::DuplicatedConversation)
-                    }
+                Some(conversation_map) => {
+                    Self::handle_request_conversation_message(conversation_map, message)
                 },
                 None => Err(SocketError::UnrelatedPeer)
             },
@@ -70,19 +66,84 @@ impl ConnectionTracker {
         }
     }
 
-    pub fn close_conversation(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
+    pub fn handle_reply_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
         match message.peer_id() {
             Some(peer_id) => match self.map.get_mut(peer_id) {
-                Some(conversation_ids) => {
-                    if conversation_ids.remove(message.conversation_id()) {
-                        Ok(message)
-                    } else {
-                        Err(SocketError::UnrelatedConversation)
-                    }
+                Some(conversation_map) => {
+                    Self::handle_reply_conversation_message(conversation_map, message)
                 },
                 None => Err(SocketError::UnrelatedPeer)
             },
             None => Err(SocketError::UnknownPeer)
+        }
+    }
+
+    fn handle_request_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketError> {
+        match conversation_map.get_mut(message.conversation_id()) {
+            Some(state) => {
+                match state.clone() {
+                    ConnTrackerState::RequestMessage(part) if part.is_continueable() => {
+                        if let ConnTrackerState::RequestMessage(part) = state {
+                            part.update_to_next_part(message.part()).map_err(|err| match err {
+                                PartError::AlreadyFinishedMultipart => SocketError::IncorrectStateError,
+                                _ => SocketError::UnrelatedConversationPart}
+                            )?;
+                        } else {
+                            panic!("Internal error! Impossible case handled")
+                        }
+                        Ok(message)
+                    }
+                    _ => Err(SocketError::IncorrectStateError)
+                }
+            }
+            None => {
+                if message.part().is_initial() {
+                    conversation_map.insert(message.conversation_id().clone(), ConnTrackerState::RequestMessage(message.part().clone()));
+                    Ok(message)
+                } else {
+                    Err(SocketError::UnrelatedConversationPart)
+                }
+            },
+        }
+    }
+
+    fn handle_reply_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketError> {
+        match conversation_map.get_mut(message.conversation_id()) {
+            Some(state) => {
+                match state.clone() {
+                    ConnTrackerState::RequestMessage(part) if part.is_last() => {
+                        if message.part().is_initial() {
+                            *state = ConnTrackerState::ReplyMessage(message.part().clone());
+                            Ok(message)
+                        } else {
+                            Err(SocketError::UnrelatedConversationPart)
+                        }
+                    }
+                    ConnTrackerState::ReplyMessage(part) if part.is_continueable() => {
+                        if let ConnTrackerState::ReplyMessage(part) = state {
+                            part.update_to_next_part(message.part()).map_err(|err| match err {
+                                PartError::AlreadyFinishedMultipart => SocketError::IncorrectStateError,
+                                _ => SocketError::UnrelatedConversationPart}
+                            )?;
+                            if part.is_last() {
+                                conversation_map.remove(message.conversation_id()).unwrap();
+                            }
+                        } else {
+                            panic!("Internal error! Impossible case handled")
+                        }
+                        Ok(message)
+                    },
+                    _ => Err(SocketError::IncorrectStateError)
+                }
+            }
+            None => Err(SocketError::IncorrectStateError),
+        }
+    }
+
+    fn accept_new_peer(&mut self, peer_id: PeerId) -> Result<(), ConnTrackerError> {
+        match self.map.insert(peer_id, HashMap::new()) {
+            None => Ok(()),
+            _ => Err(ConnTrackerError::NotNewPeer)
         }
     }
 
@@ -156,7 +217,7 @@ impl<T> InwardSocket for RequestSocket<T>
         match self.channel.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker.close_conversation(message).map_err(|error| {(None, error)})
+                self.tracker.handle_reply_message(message).map_err(|error| {(None, error)})
             }
             Err(err) => Err(err)
         }
@@ -169,7 +230,7 @@ impl<T> OutwardSocket for RequestSocket<T>
     fn send(&mut self, message:RawMessage, flags:OpFlag) -> Result<MessageMetadata, SocketError> {
         let request_message = message.commit_communication_model_id(REQUEST_MODELID);
         let metadata = request_message.metadata().clone();
-        match self.channel.send(self.tracker.initiate_new_conversation(self.tracker.apply_single_peer_if_needed(request_message)?)?, flags) {
+        match self.channel.send(self.tracker.handle_request_message(self.tracker.apply_single_peer_if_needed(request_message)?)?, flags) {
             Ok(()) => Ok(metadata),
             Err(err) => Err(err)
         }
@@ -243,7 +304,7 @@ impl<T> InwardSocket for ReplySocket<T>
         let message = self.channel.receive(flags)?;
         self.handle_received_message_model_id(&message)?;
         self.tracker.accept_peer(message.peer_id().unwrap().clone());
-        self.tracker.initiate_new_conversation(message).map_err(|error| {(None, error)})
+        self.tracker.handle_request_message(message).map_err(|error| {(None, error)})
     }
 }
 
@@ -251,7 +312,7 @@ impl<T> OutwardSocket for ReplySocket<T>
     where T: AcceptorTransport {
 
     fn send(&mut self, message:RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let processed_message = self.tracker.close_conversation(message)?.commit_communication_model_id(REPLY_MODELID);
+        let processed_message = self.tracker.handle_reply_message(message)?.commit_communication_model_id(REPLY_MODELID);
         let message_metadata = processed_message.metadata().clone();
         self.channel.send(processed_message, flags)?;
         Ok(message_metadata)

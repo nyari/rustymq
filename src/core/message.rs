@@ -65,6 +65,30 @@ impl Part {
         !std::matches!(self, Part::Single)
     }
 
+    /// Query if continuable part
+    pub fn is_continueable(&self) -> bool {
+        match self {
+            Part::Intermediate(_) => true,
+            _ => false
+        }
+    }
+
+    /// Query if part can be used as a first message
+    pub fn is_initial(&self) -> bool {
+        match self {
+            Part::Single | Part::Intermediate(0) => true,
+            _ => false 
+        }
+    }
+
+    /// Query if part can be used as the last message
+    pub fn is_last(&self) -> bool {
+        match self {
+            Part::Single | Part::Final(_) => true,
+            _ => false 
+        }
+    }
+
     /// Generate new instance for multipart message metadata with advancing the part id by one
     /// ## Example
     /// ```rust
@@ -125,6 +149,43 @@ impl Part {
         }
     }
 
+    /// Update to next index if possible.
+    /// This is used to update the part index to the one in other if it is the next consecutive one
+    /// ## Examples
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let mut original = Part::start_multipart();
+    /// 
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// original.update_to_next_part(&Part::Intermediate(1)).unwrap();
+    /// 
+    /// assert!(std::matches!(original, Part::Intermediate(1)));
+    /// # }
+    /// ```
+    pub fn update_to_next_part(&mut self, other: &Self) -> Result<(), PartError> {
+        match (&self, other) {
+            (Part::Intermediate(part), Part::Intermediate(other_part)) if *part + 1 == *other_part => Ok(*self = other.clone()),
+            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 == *other_part => Ok(*self = other.clone()),
+            (Part::Intermediate(part), Part::Intermediate(other_part)) if *part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Final(_), _) => Err(PartError::AlreadyFinishedMultipart),
+            _ => Err(PartError::NotMultipart)
+        }
+    }
+
+    /// Generate new instance with next index if possible from other. Same as update_to_next_part function without mutability
+    pub fn to_next_part(self, other: &Self) -> Result<Self, PartError> {
+        match (self, other) {
+            (Part::Intermediate(part), Part::Intermediate(other_part)) if part + 1 == *other_part => Ok(other.clone()),
+            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 == *other_part => Ok(other.clone()),
+            (Part::Intermediate(part), Part::Intermediate(other_part)) if part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Final(_), _) => Err(PartError::AlreadyFinishedMultipart),
+            _ => Err(PartError::NotMultipart)
+        }
+    }
+
 }
 
 /// # Multipart message part tracking error
@@ -134,7 +195,9 @@ pub enum PartError {
     /// Continuation requested of a non-multipart message
     NotMultipart,
     /// Continuation of an already closed or finalized multipart message
-    AlreadyFinishedMultipart
+    AlreadyFinishedMultipart,
+    /// Part not consecutive
+    NotConsecutivePart
 }
 
 /// Type definition for message identifier data structure

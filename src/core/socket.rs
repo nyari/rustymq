@@ -20,6 +20,7 @@ pub enum SocketError {
     DuplicatedConversation,
     UnrelatedPeer,
     UnrelatedConversation,
+    UnrelatedConversationPart,
     UnknownPeer,
     TransportMethodAlreadyInUse,
     TransportTargetUnreachable,
