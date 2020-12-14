@@ -353,7 +353,7 @@ impl MessageMetadata {
 
     /// Generate new instance for continuing an already existing conversation
     /// 
-    /// This method will retain all fields of the metadata except for the message identifier
+    /// This method will retain all fields of the metadata except for the message identifier and part
     /// ## Example
     /// ```rust
     /// # use rustymq::core::{MessageMetadata, Part};
@@ -366,12 +366,12 @@ impl MessageMetadata {
     /// assert_ne!(original_clone.message_id(), continuation.message_id());
     /// assert_eq!(original_clone.conversation_id(), continuation.conversation_id());
     /// assert_eq!(original_clone.peer_id(), continuation.peer_id());
-    /// assert_eq!(original_clone.part(), continuation.part());
     /// # }
     /// ```
     pub fn continue_exchange(self) -> Self {
         Self {
             messageid: MessageId::new_random(),
+            part: Part::single(),
             ..self
         }
     }

@@ -323,3 +323,133 @@ impl<T> BidirectionalSocket for ReplySocket<T>
     where T: AcceptorTransport
 {
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_tracker_single_peer_single_part_request_reply_correct() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let request = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
+        tracker.handle_reply_message(request).unwrap();
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_single_part_request_twice() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let request = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
+        assert!(std::matches!(tracker.handle_request_message(request), Err(SocketError::IncorrectStateError)));
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_single_part_request_once_reply_twice() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let request = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
+        let reply = tracker.handle_reply_message(request).unwrap();
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_single_part_request_reply_multiple_conversation_correct() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let request1 = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
+        let request2 = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
+        tracker.handle_reply_message(request2).unwrap();
+        tracker.handle_reply_message(request1).unwrap();
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_multipart_request_single_response_correct() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let metadata = MessageMetadata::new_multipart().applied_peer_id(peer);
+        let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
+        let message_part2 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);
+        let message_part3 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap()
+                                                                      .next_final_multipart().unwrap(), vec![]);
+
+        tracker.handle_request_message(message_part1).unwrap();
+        tracker.handle_request_message(message_part2).unwrap();
+        tracker.handle_request_message(message_part3).unwrap();
+
+        let reply = tracker.handle_reply_message(RawMessage::with_metadata(metadata.continue_exchange(), vec![])).unwrap();
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_multipart_request_single_response_no_final_multipart_message_before_reply() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let metadata = MessageMetadata::new_multipart().applied_peer_id(peer);
+        let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
+        let message_part2 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);
+        let message_part3 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap()
+                                                                      .next_multipart().unwrap(), vec![]);
+
+        tracker.handle_request_message(message_part1).unwrap();
+        tracker.handle_request_message(message_part2).unwrap();
+        tracker.handle_request_message(message_part3).unwrap();
+
+        assert!(std::matches!(tracker.handle_reply_message(RawMessage::with_metadata(metadata.continue_exchange(), vec![])), Err(SocketError::IncorrectStateError)));
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_single_request_multipart_response_correct() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let metadata = MessageMetadata::new().applied_peer_id(peer);
+        let message = RawMessage::with_metadata(metadata.clone(), vec![]);
+
+        tracker.handle_request_message(message).unwrap();
+
+        tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                               .started_multipart(), vec![])).unwrap();
+        tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                               .started_multipart()
+                                                                               .next_multipart().unwrap(), vec![])).unwrap();
+        let reply = tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                                           .started_multipart()
+                                                                                           .next_multipart().unwrap()
+                                                                                           .next_final_multipart().unwrap(), vec![])).unwrap();
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+    }
+
+    #[test]
+    fn connection_tracker_single_peer_multipart_request_multipart_response_correct() {
+        let mut tracker = ConnectionTracker::new();
+        let peer = PeerId::new(1);
+        tracker.accept_peer(peer);
+        let metadata = MessageMetadata::new_multipart().applied_peer_id(peer);
+        let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
+        let message_part2 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);
+        let message_part3 = RawMessage::with_metadata(metadata.clone().next_multipart().unwrap()
+                                                                      .next_final_multipart().unwrap(), vec![]);
+
+        tracker.handle_request_message(message_part1).unwrap();
+        tracker.handle_request_message(message_part2).unwrap();
+        tracker.handle_request_message(message_part3).unwrap();
+
+        tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                               .started_multipart(), vec![])).unwrap();
+        tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                               .started_multipart()
+                                                                               .next_multipart().unwrap(), vec![])).unwrap();
+        let reply = tracker.handle_reply_message(RawMessage::with_metadata(metadata.clone().continue_exchange()
+                                                                                           .started_multipart()
+                                                                                           .next_multipart().unwrap()
+                                                                                           .next_final_multipart().unwrap(), vec![])).unwrap();
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+    }
+}
