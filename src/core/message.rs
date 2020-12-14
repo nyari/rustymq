@@ -163,6 +163,25 @@ impl Part {
     /// assert!(std::matches!(original, Part::Intermediate(1)));
     /// # }
     /// ```
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let mut original = Part::start_multipart();
+    /// 
+    /// assert!(std::matches!(original, Part::Intermediate(0)));
+    /// assert!(std::matches!(original.update_to_next_part(&Part::Intermediate(2)),
+    ///                       Err(PartError::NotConsecutivePart)));
+    /// # }
+    /// ```
+    /// ```rust
+    /// # use rustymq::core::{Part, PartError};
+    /// # fn main() {
+    /// let mut original = Part::Final(2);
+    /// 
+    /// assert!(std::matches!(original.update_to_next_part(&Part::Intermediate(0)),
+    ///                       Err(PartError::AlreadyFinishedMultipart)));
+    /// # }
+    /// ```
     pub fn update_to_next_part(&mut self, other: &Self) -> Result<(), PartError> {
         match (&self, other) {
             (Part::Intermediate(part), Part::Intermediate(other_part)) if *part + 1 == *other_part => Ok(*self = other.clone()),
