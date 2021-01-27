@@ -1,4 +1,4 @@
-use core::socket::{Socket, InwardSocket, OutwardSocket, ConnectorError, SocketError, OpFlag, PeerIdentification};
+use core::socket::{Socket, InwardSocket, OutwardSocket, SocketError, SocketInternalError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::message::{PeerId, RawMessage, MessageMetadata, Message};
 
@@ -18,27 +18,27 @@ impl ConnectionTracker {
         }
     }
 
-    pub fn accept_new_peer(&mut self, peer_id: PeerId) -> Result<(), ConnectorError> {
+    pub fn accept_new_peer(&mut self, peer_id: PeerId) -> Result<(), SocketInternalError> {
         if self.peers.insert(peer_id) {
             Ok(())
         } else {
-            Err(ConnectorError::AlreadyConnected)
+            Err(SocketInternalError::AlreadyConnected)
         }
     }
 
-    pub fn check_peer_connected(&self, peer_id: PeerId) -> Result<(), (Option<PeerId>, SocketError)> {
+    pub fn check_peer_connected(&self, peer_id: PeerId) -> Result<(), (Option<PeerId>, SocketInternalError)> {
         if self.peers.contains(&peer_id) {
             Ok(())
         } else {
-            Err((Some(peer_id), SocketError::UnrelatedPeer))
+            Err((Some(peer_id), SocketInternalError::UnrelatedPeer))
         }
     }
 
-    fn close_connection(&mut self, peer_id: PeerId) -> Result<(), ConnectorError> {
+    fn close_connection(&mut self, peer_id: PeerId) -> Result<(), SocketInternalError> {
         if self.peers.remove(&peer_id) {
             Ok(()) 
         } else {
-            Err(ConnectorError::UnknownPeer)
+            Err(SocketInternalError::UnknownPeer)
         }
     }
 }
@@ -70,17 +70,17 @@ impl<T> SubscriberSocket<T>
 impl<T> Socket for SubscriberSocket<T>
     where T: InitiatorTransport {
 
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
+    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         let peerid = self.channel.connect(target)?.expect("Transport did not provide peer id");
         self.tracker.accept_new_peer(peerid.clone())?;
         Ok(Some(peerid))
     }
 
-    fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
-        Err(ConnectorError::NotSupportedOperation)
+    fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        Err(SocketError::NotSupportedOperation)
     }
 
-    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.close_connection(peer_id)?;
@@ -96,7 +96,7 @@ impl<T> Socket for SubscriberSocket<T>
     }
 
     fn close(self) -> Result<(), SocketError> {
-        self.channel.close()
+        self.channel.close().into()
     }
 }
 
@@ -107,7 +107,7 @@ impl<T> InwardSocket for SubscriberSocket<T>
         match self.channel.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker.check_peer_connected(message.peer_id().ok_or((None, SocketError::UnknownPeer))?)?;
+                self.tracker.check_peer_connected(message.peer_id().ok_or((None, SocketError::UnknownPeer))?).map_err(|(peerid, err)| {(peerid, SocketError::from(err))})?;
                 Ok(message)
             }
             Err(err) => Err(err)
@@ -140,15 +140,15 @@ impl<T> PublisherSocket<T>
 impl<T> Socket for PublisherSocket<T>
     where T: AcceptorTransport {
 
-    fn connect(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
-        Err(ConnectorError::NotSupportedOperation)
+    fn connect(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        Err(SocketError::NotSupportedOperation)
     }
 
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
+    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         self.channel.bind(target)
     }
 
-    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(_peer_id) => {
                 self.channel.close_connection(peer_identification).expect("Connection existance already checked, should not happen");

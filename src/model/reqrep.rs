@@ -1,4 +1,4 @@
-use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, ConnectorError, SocketError, OpFlag, PeerIdentification};
+use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, SocketError, SocketInternalError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message, Part, PartError};
 
@@ -44,56 +44,56 @@ impl ConnectionTracker {
         }
     }
 
-    pub fn apply_single_peer_if_needed(&self, message: RawMessage) -> Result<RawMessage, SocketError> {
+    pub fn apply_single_peer_if_needed(&self, message: RawMessage) -> Result<RawMessage, SocketInternalError> {
         match message.peer_id() {
             Some(_) => { Ok(message) }
             None => match self.get_single_peer() {
                 Some(peer_id) => Ok(message.apply_peer_id(peer_id)),
-                None => Err(SocketError::UnknownPeer)
+                None => Err(SocketInternalError::UnknownPeer)
             }
         }
     }
 
-    pub fn handle_request_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
+    pub fn handle_request_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketInternalError> {
         match message.peer_id() {
             Some(peer_id) => match self.map.get_mut(peer_id) {
                 Some(conversation_map) => {
                     Self::handle_request_conversation_message(conversation_map, message)
                 },
-                None => Err(SocketError::UnrelatedPeer)
+                None => Err(SocketInternalError::UnrelatedPeer)
             },
-            None => Err(SocketError::UnknownPeer)
+            None => Err(SocketInternalError::UnknownPeer)
         }
     }
 
-    pub fn handle_reply_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketError> {
+    pub fn handle_reply_message(&mut self, message: RawMessage) -> Result<RawMessage, SocketInternalError> {
         match message.peer_id() {
             Some(peer_id) => match self.map.get_mut(peer_id) {
                 Some(conversation_map) => {
                     Self::handle_reply_conversation_message(conversation_map, message)
                 },
-                None => Err(SocketError::UnrelatedPeer)
+                None => Err(SocketInternalError::UnrelatedPeer)
             },
-            None => Err(SocketError::UnknownPeer)
+            None => Err(SocketInternalError::UnknownPeer)
         }
     }
 
-    fn handle_request_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketError> {
+    fn handle_request_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketInternalError> {
         match conversation_map.get_mut(message.conversation_id()) {
             Some(state) => {
                 match state.clone() {
                     ConnTrackerState::RequestMessage(part) if part.is_continueable() => {
                         if let ConnTrackerState::RequestMessage(part) = state {
                             part.update_to_next_part(message.part()).map_err(|err| match err {
-                                PartError::AlreadyFinishedMultipart => SocketError::IncorrectStateError,
-                                _ => SocketError::UnrelatedConversationPart}
+                                PartError::AlreadyFinishedMultipart => SocketInternalError::IncorrectStateError,
+                                _ => SocketInternalError::UnrelatedConversationPart}
                             )?;
                         } else {
                             panic!("Internal error! Impossible case handled")
                         }
                         Ok(message)
                     }
-                    _ => Err(SocketError::IncorrectStateError)
+                    _ => Err(SocketInternalError::IncorrectStateError)
                 }
             }
             None => {
@@ -101,13 +101,13 @@ impl ConnectionTracker {
                     conversation_map.insert(message.conversation_id().clone(), ConnTrackerState::RequestMessage(message.part().clone()));
                     Ok(message)
                 } else {
-                    Err(SocketError::UnrelatedConversationPart)
+                    Err(SocketInternalError::UnrelatedConversationPart)
                 }
             },
         }
     }
 
-    fn handle_reply_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketError> {
+    fn handle_reply_conversation_message(conversation_map: &mut HashMap<ConversationId, ConnTrackerState>, message: RawMessage) -> Result<RawMessage, SocketInternalError> {
         match conversation_map.get_mut(message.conversation_id()) {
             Some(state) => {
                 match state.clone() {
@@ -116,14 +116,14 @@ impl ConnectionTracker {
                             *state = ConnTrackerState::ReplyMessage(message.part().clone());
                             Ok(message)
                         } else {
-                            Err(SocketError::UnrelatedConversationPart)
+                            Err(SocketInternalError::UnrelatedConversationPart)
                         }
                     }
                     ConnTrackerState::ReplyMessage(part) if part.is_continueable() => {
                         if let ConnTrackerState::ReplyMessage(part) = state {
                             part.update_to_next_part(message.part()).map_err(|err| match err {
-                                PartError::AlreadyFinishedMultipart => SocketError::IncorrectStateError,
-                                _ => SocketError::UnrelatedConversationPart}
+                                PartError::AlreadyFinishedMultipart => SocketInternalError::IncorrectStateError,
+                                _ => SocketInternalError::UnrelatedConversationPart}
                             )?;
                             if part.is_last() {
                                 conversation_map.remove(message.conversation_id()).unwrap();
@@ -133,10 +133,10 @@ impl ConnectionTracker {
                         }
                         Ok(message)
                     },
-                    _ => Err(SocketError::IncorrectStateError)
+                    _ => Err(SocketInternalError::IncorrectStateError)
                 }
             }
-            None => Err(SocketError::IncorrectStateError),
+            None => Err(SocketInternalError::IncorrectStateError),
         }
     }
 
@@ -147,8 +147,8 @@ impl ConnectionTracker {
         }
     }
 
-    fn close_connection(&mut self, peer_id: PeerId) -> Result<(), ConnectorError> {
-        self.map.remove(&peer_id).ok_or(ConnectorError::UnknownPeer)?;
+    fn close_connection(&mut self, peer_id: PeerId) -> Result<(), SocketInternalError> {
+        self.map.remove(&peer_id).ok_or(SocketInternalError::UnknownPeer)?;
         Ok(())
     }
 }
@@ -180,17 +180,17 @@ impl<T> RequestSocket<T>
 impl<T> Socket for RequestSocket<T>
     where T: InitiatorTransport {
 
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
+    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         let peer_id = self.channel.connect(target)?.expect("Transport did not provide peer id");
         self.tracker.accept_peer(peer_id);
         Ok(Some(peer_id))
     }
 
-    fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
-        Err(ConnectorError::NotSupportedOperation)
+    fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        Err(SocketError::NotSupportedOperation)
     }
 
-    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.close_connection(peer_id)?;
@@ -217,7 +217,7 @@ impl<T> InwardSocket for RequestSocket<T>
         match self.channel.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker.handle_reply_message(message).map_err(|error| {(None, error)})
+                self.tracker.handle_reply_message(message).map_err(|error| {(None, SocketError::from(error))})
             }
             Err(err) => Err(err)
         }
@@ -269,15 +269,15 @@ impl<T> ReplySocket<T>
 impl<T> Socket for ReplySocket<T>
     where T: AcceptorTransport {
 
-    fn connect(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
-        Err(ConnectorError::NotSupportedOperation)
+    fn connect(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        Err(SocketError::NotSupportedOperation)
     }
 
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError> {
+    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         self.channel.bind(target)
     }
 
-    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError> {
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.close_connection(peer_id)?;
@@ -304,7 +304,7 @@ impl<T> InwardSocket for ReplySocket<T>
         let message = self.channel.receive(flags)?;
         self.handle_received_message_model_id(&message)?;
         self.tracker.accept_peer(message.peer_id().unwrap().clone());
-        self.tracker.handle_request_message(message).map_err(|error| {(None, error)})
+        self.tracker.handle_request_message(message).map_err(|error| {(None, SocketError::from(error))})
     }
 }
 
@@ -343,7 +343,7 @@ mod tests {
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
         let request = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
-        assert!(std::matches!(tracker.handle_request_message(request), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_request_message(request), Err(SocketInternalError::IncorrectStateError)));
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
         tracker.accept_peer(peer);
         let request = tracker.handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer)).unwrap();
         let reply = tracker.handle_reply_message(request).unwrap();
-        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketInternalError::IncorrectStateError)));
     }
 
     #[test]
@@ -383,7 +383,7 @@ mod tests {
         tracker.handle_request_message(message_part3).unwrap();
 
         let reply = tracker.handle_reply_message(RawMessage::with_metadata(metadata.continue_exchange(), vec![])).unwrap();
-        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketInternalError::IncorrectStateError)));
     }
 
     #[test]
@@ -401,7 +401,7 @@ mod tests {
         tracker.handle_request_message(message_part2).unwrap();
         tracker.handle_request_message(message_part3).unwrap();
 
-        assert!(std::matches!(tracker.handle_reply_message(RawMessage::with_metadata(metadata.continue_exchange(), vec![])), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_reply_message(RawMessage::with_metadata(metadata.continue_exchange(), vec![])), Err(SocketInternalError::IncorrectStateError)));
     }
 
     #[test]
@@ -423,7 +423,7 @@ mod tests {
                                                                                            .started_multipart()
                                                                                            .next_multipart().unwrap()
                                                                                            .next_final_multipart().unwrap(), vec![])).unwrap();
-        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketInternalError::IncorrectStateError)));
     }
 
     #[test]
@@ -450,6 +450,6 @@ mod tests {
                                                                                            .started_multipart()
                                                                                            .next_multipart().unwrap()
                                                                                            .next_final_multipart().unwrap(), vec![])).unwrap();
-        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketError::IncorrectStateError)));
+        assert!(std::matches!(tracker.handle_reply_message(reply), Err(SocketInternalError::IncorrectStateError)));
     }
 }

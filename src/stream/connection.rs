@@ -2,7 +2,7 @@ use core::message::{Message, RawMessage, MessageMetadata};
 use core::util;
 use core::util::thread::{StoppedSemaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
-use core::socket::{SocketError};
+use core::socket::{SocketInternalError};
 use stream;
 
 use std::collections::{VecDeque, HashSet};
@@ -146,7 +146,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         Ok(())
     }
 
-    pub fn process_receiving(&mut self) -> Result<ReadWriteStremConnectionState, SocketError> {
+    pub fn process_receiving(&mut self) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
         match self.proceed_receiving() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Remainder) => Ok(ReadWriteStremConnectionState::Busy),
@@ -157,7 +157,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         }
     }
 
-    pub fn process_sending(&mut self) -> Result<ReadWriteStremConnectionState, SocketError> {
+    pub fn process_sending(&mut self) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
         match self.proceed_sending() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Empty) => {
@@ -178,7 +178,7 @@ pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write + Send> {
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
-    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<(Self, ReadWriteStreamConnectionHandle), SocketError> {
+    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<(Self, ReadWriteStreamConnectionHandle), SocketInternalError> {
         let worker = Self {
             stream: stream
         };
@@ -186,7 +186,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
         Ok((worker, handle))
     }
 
-    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketError> {
+    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
         loop {
             loop {
@@ -208,13 +208,13 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 
 pub struct ReadWriteStreamConnectionManager {
     handle: ReadWriteStreamConnectionHandle,
-    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketError>>>>,
-    last_error: RefCell<Option<Result<(), SocketError>>>,
+    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>>,
+    last_error: RefCell<Option<Result<(), SocketInternalError>>>,
     stop_semaphore: StoppedSemaphore
 }
 
 impl ReadWriteStreamConnectionManager {
-    pub fn construct_from_worker_handle<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketError> {
+    pub fn construct_from_worker_handle<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
         let (worker, handle) = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = StoppedSemaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
@@ -226,11 +226,11 @@ impl ReadWriteStreamConnectionManager {
         })
     }
 
-    fn get_last_error(&self) -> Option<Result<(), SocketError>> {
+    fn get_last_error(&self) -> Option<Result<(), SocketInternalError>> {
         self.last_error.borrow().clone()
     }
 
-    fn check_worker_state(&self) -> Result<(), SocketError> {
+    fn check_worker_state(&self) -> Result<(), SocketInternalError> {
         if let Some(last_error) = self.get_last_error() {
             last_error.clone()
         } else {
@@ -238,7 +238,7 @@ impl ReadWriteStreamConnectionManager {
                 let result = match self.worker_thread.borrow_mut().take().unwrap().join() {
                     Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
                     Ok(error) => error,
-                    Err(_) => Err(SocketError::InternalError)
+                    Err(_) => Err(SocketInternalError::UnknownInternalError)
                 };
                 *self.last_error.borrow_mut() = Some(result.clone());
                 result
@@ -248,13 +248,13 @@ impl ReadWriteStreamConnectionManager {
         }
     }
 
-    pub fn send_async(&self, message: RawMessage) -> Result<(), SocketError> {
+    pub fn send_async(&self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
         self.handle.add_to_outward_queue(message);
         Ok(())
     }
 
-    pub fn send(&self, message: RawMessage) -> Result<(), SocketError> {
+    pub fn send(&self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
         let metadata = message.metadata().clone();
         self.handle.add_to_prio_outward_queue(message);
@@ -269,7 +269,7 @@ impl ReadWriteStreamConnectionManager {
         })
     }
 
-    pub fn receive_async_all(&self) -> (Vec<RawMessage>, Option<SocketError>) {
+    pub fn receive_async_all(&self) -> (Vec<RawMessage>, Option<SocketInternalError>) {
         let messages = self.handle.receive_async_all();
         match self.check_worker_state() {
             Ok(()) => (messages, None),

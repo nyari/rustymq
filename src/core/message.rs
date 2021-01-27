@@ -543,7 +543,7 @@ pub trait Message: Sized
         self.mutated_metadata(|x| x.applied_peer_id(peer_id))
     }
 
-    /// Generate new instance with new peer identifier in the stored metadata but keeping the payload
+    /// Generate new instance with new communication model identifier in metadata but keeping everything else
     fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
         self.mutated_metadata(|metadata| {metadata.commit_communication_model_id(model_id)})
     }
@@ -561,6 +561,7 @@ pub trait Message: Sized
     }
 }
 
+/// RawMessage is a message type implementing the Message trait, with a binary buffer set as payload
 #[derive(Clone)]
 #[derive(Debug)]
 pub struct RawMessage
@@ -607,6 +608,7 @@ impl Message for RawMessage {
     }
 }
 
+/// Typed message is a generic implementation for a Message trait with custom type
 #[derive(Clone)]
 pub struct TypedMessage<T>
     where T: TryInto<Buffer>, Buffer: TryInto<T>

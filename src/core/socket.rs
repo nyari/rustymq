@@ -1,23 +1,20 @@
 use core::message::{Message, RawMessage, TypedMessage, PeerId, MessageMetadata, Buffer};
 use core::transport::{TransportMethod};
 
-use std::convert::{TryFrom, TryInto};
-use std::time::{Duration};
+use std::convert::{TryFrom, TryInto, From};
 
 #[derive(Debug)]
 #[derive(Clone)]
 pub enum OpFlag {
     Default,
     NoWait,
-    Timeout(Duration)
+//    Timeout(Duration)
 }
 
 #[derive(Debug)]
 #[derive(Clone)]
 pub enum SocketError {
     IncorrectStateError,
-    InternalError,
-    DuplicatedConversation,
     UnrelatedPeer,
     UnrelatedConversation,
     UnrelatedConversationPart,
@@ -26,26 +23,83 @@ pub enum SocketError {
     TransportTargetUnreachable,
     Disconnected,
     ConnectionRefused,
-    IncompleteData,
     UnknownDataFormatReceived,
     Timeout,
     IncompatiblePeer,
     HandshakeFailed,
     UnsupportedOpFlag(OpFlag),
-    MissingDNSDomain
-}
-
-#[derive(Debug)]
-#[derive(Clone)]
-pub enum ConnectorError {
+    MissingDNSDomain,
     InvalidTransportMethod,
     AlreadyConnected,
     AlreadyInUse,
     NotSupportedOperation,
     CouldNotConnect,
-    InternalError,
+    AlreadyDisconnected
+}
+
+#[derive(Debug)]
+#[derive(Clone)]
+pub enum SocketInternalError {
+    IncorrectStateError,
+    UnrelatedPeer,
+    UnrelatedConversation,
+    UnrelatedConversationPart,
+    UnknownPeer,
+    TransportMethodAlreadyInUse,
+    TransportTargetUnreachable,
+    Disconnected,
+    ConnectionRefused,
+    UnknownDataFormatReceived,
+    Timeout,
+    IncompatiblePeer,
+    HandshakeFailed,
+    UnsupportedOpFlag(OpFlag),
+    MissingDNSDomain,
+    InvalidTransportMethod,
+    AlreadyConnected,
+    AlreadyInUse,
+    NotSupportedOperation,
+    CouldNotConnect,
     AlreadyDisconnected,
-    UnknownPeer
+
+    IncompleteData,
+    UnknownInternalError
+}
+
+impl SocketInternalError {
+    pub fn externalize_result<T>(result: Result<T, SocketInternalError>)-> Result<T, SocketError> {
+        result.map_err(|x| {SocketError::from(x)})
+    }
+}
+
+impl From<SocketInternalError> for SocketError
+{
+    fn from(input: SocketInternalError) -> SocketError {
+        match input {
+            SocketInternalError::IncorrectStateError => SocketError::IncorrectStateError,
+            SocketInternalError::UnrelatedPeer => SocketError::UnrelatedPeer,
+            SocketInternalError::UnrelatedConversation => SocketError::UnrelatedConversation,
+            SocketInternalError::UnrelatedConversationPart => SocketError::UnrelatedConversationPart,
+            SocketInternalError::UnknownPeer => SocketError::UnknownPeer,
+            SocketInternalError::TransportMethodAlreadyInUse => SocketError::TransportMethodAlreadyInUse,
+            SocketInternalError::TransportTargetUnreachable => SocketError::TransportTargetUnreachable,
+            SocketInternalError::Disconnected => SocketError::Disconnected,
+            SocketInternalError::ConnectionRefused => SocketError::ConnectionRefused,
+            SocketInternalError::UnknownDataFormatReceived => SocketError::UnknownDataFormatReceived,
+            SocketInternalError::Timeout => SocketError::Timeout,
+            SocketInternalError::IncompatiblePeer => SocketError::IncompatiblePeer,
+            SocketInternalError::HandshakeFailed => SocketError::HandshakeFailed,
+            SocketInternalError::UnsupportedOpFlag(op_flag) => SocketError::UnsupportedOpFlag(op_flag),
+            SocketInternalError::MissingDNSDomain => SocketError::MissingDNSDomain,
+            SocketInternalError::InvalidTransportMethod => SocketError::InvalidTransportMethod,
+            SocketInternalError::AlreadyConnected => SocketError::AlreadyConnected,
+            SocketInternalError::AlreadyInUse => SocketError::AlreadyInUse,
+            SocketInternalError::NotSupportedOperation => SocketError::NotSupportedOperation,
+            SocketInternalError::CouldNotConnect => SocketError::CouldNotConnect,
+            SocketInternalError::AlreadyDisconnected => SocketError::AlreadyDisconnected,
+            err => panic!("SocketInternalError occured that cannot be converted to SocketError: {:?}", err)
+        }
+    }
 }
 
 pub enum PeerIdentification {
@@ -77,9 +131,9 @@ pub enum QueryTypedError<T>
 }
 
 pub trait Socket : Send + Sync {
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError>;
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, ConnectorError>;
-    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), ConnectorError>;
+    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError>;
     fn close(self) -> Result<(), SocketError>;
 }
  

@@ -1,4 +1,4 @@
-use core::socket::{SocketError};
+use core::socket::{SocketInternalError};
 use core::message::{RawMessage, Buffer};
 use core::serializer::{Serializable, FlatDeserializer};
 use core::serializer;
@@ -23,23 +23,23 @@ impl RawMessageReader {
         }
     }
 
-    fn try_parse_raw_message(&mut self) -> Result<RawMessage, SocketError> {
+    fn try_parse_raw_message(&mut self) -> Result<RawMessage, SocketInternalError> {
         let (mut deserializer, actual_bytes) = match FlatDeserializer::new(&self.buffer[..self.len]) {
             Ok(result) => Ok((result, self.len)),
             Err(serializer::Error::IncorrectBufferSize(actual_size)) => {
                 if self.len < actual_size as usize {
-                    Err(SocketError::IncompleteData)
+                    Err(SocketInternalError::IncompleteData)
                 } else if self.len > actual_size as usize {
                     match FlatDeserializer::new(&self.buffer[..actual_size as usize]) {
                         Ok(result) => Ok((result, actual_size as usize)),
-                        Err(_) => Err(SocketError::UnknownDataFormatReceived)
+                        Err(_) => Err(SocketInternalError::UnknownDataFormatReceived)
                     }
                 } else {
-                    Err(SocketError::UnknownDataFormatReceived)
+                    Err(SocketInternalError::UnknownDataFormatReceived)
                 }
             }
-            Err(serializer::Error::EndOfBuffer) => Err(SocketError::IncompleteData),
-            _ => Err(SocketError::UnknownDataFormatReceived),
+            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::IncompleteData),
+            _ => Err(SocketInternalError::UnknownDataFormatReceived),
         }?;
 
         match RawMessage::deserialize(&mut deserializer) {
@@ -50,8 +50,8 @@ impl RawMessageReader {
                 self.buffer.truncate(self.len);
                 Ok(message)
             }
-            Err(serializer::Error::DemarshallingFailed) | Err(serializer::Error::ByteOrderMarkError) => Err(SocketError::UnknownDataFormatReceived),
-            Err(serializer::Error::EndOfBuffer) => Err(SocketError::InternalError),
+            Err(serializer::Error::DemarshallingFailed) | Err(serializer::Error::ByteOrderMarkError) => Err(SocketInternalError::UnknownDataFormatReceived),
+            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::UnknownInternalError),
             _ => panic!("Any other case should already have been handled")
         }
     }
@@ -67,14 +67,14 @@ impl RawMessageReader {
             };
 
             match last_error {
-                SocketError::IncompleteData => {
+                SocketInternalError::IncompleteData => {
                     if outputs.is_empty() {
                         Err(State::Remainder)
                     } else {
                         Ok(outputs)
                     }
                 },
-                SocketError::InternalError => panic!("Internal error"),
+                SocketInternalError::UnknownInternalError => panic!("Internal error"),
                 other => Err(State::from(other))
             }
         } else {

@@ -3,7 +3,7 @@ use super::internal::*;
 use openssl::ssl::{SslConnector, SslStream, SslAcceptor};
 use std::net::{SocketAddr};
 
-use core::socket::{SocketError};
+use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
 
 use std::sync::Arc;
@@ -112,8 +112,8 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = SslStream<net::TcpStream>;
 
-    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
-        let dns_address = addr.get_dns_name().ok_or(SocketError::MissingDNSDomain)?;
+    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
+        let dns_address = addr.get_dns_name().ok_or(SocketInternalError::MissingDNSDomain)?;
         let stream = net::TcpStream::connect(addr.get_address())?;
 
         match self.connector.connect(dns_address.as_str(), stream) {
@@ -125,13 +125,12 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
             }
             Err(err) => {
-                eprintln!("SSL connection failed: {}", err);
-                Err(SocketError::HandshakeFailed)
+                Err(SocketInternalError::HandshakeFailed)
             }
         }
     }
 
-    fn accept_connection(&self, (mut stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketError> {
+    fn accept_connection(&self, (mut stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let stream_mut_ref = stream.get_mut();
         stream_mut_ref.set_nonblocking(true)?;
         stream_mut_ref.set_write_timeout(None)?;
