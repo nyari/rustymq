@@ -124,7 +124,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
             }
-            Err(err) => {
+            Err(_) => {
                 Err(SocketInternalError::HandshakeFailed)
             }
         }
