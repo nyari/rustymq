@@ -11,7 +11,6 @@ pub enum State {
 
 impl From<io::Error> for SocketInternalError {
     fn from(error: io::Error) -> Self {
-        println!("{}: {:?}", error, error.kind());
         match error.kind() {
             io::ErrorKind::AddrInUse => SocketInternalError::TransportMethodAlreadyInUse,
             io::ErrorKind::AddrNotAvailable => SocketInternalError::TransportTargetUnreachable,
