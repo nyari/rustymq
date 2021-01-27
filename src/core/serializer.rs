@@ -1,38 +1,63 @@
+//! # Serializer module
+//! ## Summary
+//! This module contains a basic serialization functionality used internally by RusyMQ
+//! But it can be used externally for serialization as a basic tool for serialization.
+//! ## Details
+//! The reason not to use a serialization library was to keep the dependencies of the library minimal
+//! and also to have a simple and fast binary serialization that also supports big and little endiannes
+
+/// General buffer type to be used in RusyMQ
 pub type Buffer = Vec<u8>;
+/// General buffer slice type to be used in RustyMQ
 pub type BufferSlice<'a> = &'a[u8];
+/// General buffer mutable slice type to be used in RustyMQ
 pub type BufferMutSlice<'a> = &'a mut[u8];
 
+/// Byte order mark value for serialization
 const BOM_VALUE: u16 = 0xA55A;
+/// Changed byte order mark value for serialization
 const BOM_CHANGED_VALUE: u16 = 0x5AA5;
 
+
+/// Signaling serialization errors
 #[derive(Debug)]
 pub enum Error {
+    /// Error occured while demarshalling an input buffer during deserialization
     DemarshallingFailed,
+    /// Byte order mark damaged
     ByteOrderMarkError,
+    /// The buffer passed for deserialization does not match the required size. The stored value contains the size expected
     IncorrectBufferSize(u64),
+    /// The buffer ended before the metadata on the beginning of the serialization could be parsed
     EndOfBuffer
 }
 
+/// Serializer trait that can serialize a [`Serializable`] object
 pub trait Serializer : Sized {
+    /// Append a slice slice to the buffer stored in the serializer
     fn append<'a>(&mut self, slice: BufferSlice<'a>);
+
+    /// Finalize the serializer and return the buffer containing the serialized data
+    fn finalize(self) -> Buffer;
     
+    /// Serialize [`Serializable`] object by reference
     #[inline]
     fn serialize<T:Serializable>(&mut self, serializable: &T) {
         serializable.serialize(self);
     }
     
+    /// Serialize [`Serializable`] object by passing ownership
     #[inline]
     fn serialize_pass<T:Serializable>(&mut self, serializable: T) {
         self.serialize(&serializable)
     }
 
-    fn finalize(self) -> Buffer;
-
+    /// Serizalize [`RawSerializable`] value
     #[inline]
     fn serialize_raw<T:RawSerializable>(&mut self, serializable: &T) {
         self.append(sized_to_byte_slice(serializable));
     }
-
+    /// Serizalize a slice of [`RawSerializable`] objects
     #[inline]
     fn serialize_raw_slice<T:RawSerializable>(&mut self, slice: &[T]) {
         self.serialize_raw(&(slice.len() as u64));
@@ -40,10 +65,16 @@ pub trait Serializer : Sized {
     }
 }
 
+/// Deserializer trait that can deserialize a buffer containining [`Serializable`] objects
 pub trait Deserializer : Sized {
+    /// Consume an amount of the the buffer being parsed by the deserializer
     fn consume<'a>(&'a mut self, amount: usize) -> Result<BufferSlice<'a>, Error>;
+    /// Deserialize a [`Serializable`] object from the buffer being parsed by the deserializer
     fn deserialize<T:Serializable>(&mut self) -> Result<T, Error>;
+    /// Check if byte order correction is needed on [`RawSerializable`] values being deserialized
+    fn byte_order_correction(&self) -> bool;
 
+    /// Deserialize a [`RawSerializable`] value from the buffer being parsed by the deserializer
     #[inline]
     fn deserialize_raw<T:RawSerializable>(&mut self) -> Result<T, Error> {
         let slice = self.consume(std::mem::size_of::<T>())?;
@@ -53,6 +84,7 @@ pub trait Deserializer : Sized {
         }
     }
 
+    /// Deserialize a slice of [`RawSerializable`] values from the buffer being parsed by the deserializer
     fn deserialize_raw_slice<T:RawSerializable>(&mut self) -> Result<Vec<T>, Error> {
         let length = (self.deserialize_raw::<u64>()?) as usize;
         let byte_slice = self.consume(std::mem::size_of::<T>() * length)?;
@@ -72,18 +104,22 @@ pub trait Deserializer : Sized {
 
         Ok(result)
     }
-    fn byte_order_correction(&self) -> bool;
 }
 
+/// Trait that enables a [`Serializer`] object can serialize and a [`Deserializer`] object can deserialize
 pub trait Serializable where Self: Sized {
+    /// Serialize `self` into `serializer`
     fn serialize<T:Serializer>(&self, serializer: &mut T);
+    /// Deserialize a value with the type of `Self` from a deserializer
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, Error>;
 }
 
+/// Trait that marks primitive types that can be serialized with [`Serializer`] object
 pub trait RawSerializable where Self: Sized + Copy {
     fn swap_bytes(self) -> Self;
 }
 
+/// Implementation for serializing an [`Option`] given that the contained value is a [`Serializable`]
 impl<U: Serializable> Serializable for Option<U> 
     where U: Serializable {
     
@@ -115,11 +151,13 @@ impl<U: Serializable> Serializable for Option<U>
     }
 }
 
+/// Implementation for [`Serializer`] that stores values in a flat binary buffer
 pub struct FlatSerializer {
     buffer: Buffer
 }
 
 impl FlatSerializer {
+    /// Create a new FlatSerializer
     pub fn new() -> Self {
         Self {
             buffer: Vec::new()
@@ -154,6 +192,7 @@ impl Serializer for FlatSerializer {
     }
 }
 
+/// Implementation for [`Deserializer`] that restores objects from a flat binary buffer
 pub struct FlatDeserializer<'a> {
     buffer: BufferSlice<'a>,
     offset: usize,
@@ -161,6 +200,7 @@ pub struct FlatDeserializer<'a> {
 }
 
 impl<'a> FlatDeserializer<'a> {
+    /// Create a new FlatDeserializer that that will parse the [`BufferSlice`] given as parameter
     pub fn new(buffer: BufferSlice<'a>) -> Result<Self, Error> {
         let mut result = Self {
             buffer: buffer,
