@@ -1,8 +1,14 @@
+//! # Core internal utilites
+//! The module contains miscellaneous datastructures and functionalities
+//! used by RustyMQ
+
 use rand;
 use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
 use std;
 
+/// # Identifier
+/// Used as an identifier in messages as peer and other identifiers
 #[derive(PartialEq)]
 #[derive(Eq)]
 #[derive(PartialOrd)]
@@ -17,18 +23,21 @@ pub struct Identifier
 }
 
 impl Identifier {
+    /// Create a new identifier from seed
     pub fn new(core: u64) -> Self {
         Self {
             core:core
         }
     }
 
+    /// Create a random identifier
     pub fn new_random() -> Self {
         Self {
             core: rand::random()
         }
     }
 
+    /// Query internal state of identifier
     pub fn get(&self) -> u64 {
         self.core.clone()
     }
@@ -96,6 +105,7 @@ impl Serializable for VersionInfo {
     }
 }
 
+/// Iterate through single element
 pub struct SingleIter<T> {
     item: Option<T>
 }
@@ -114,17 +124,25 @@ impl<T> std::iter::Iterator for SingleIter<T> {
         self.item.take()
     }
 }
-
+/// # Timing related helpers
+/// Timing functionality used internally by RustyMQ
 pub mod time {
     use std::time::Duration;
 
+    /// # DurationBackoff interface
+    /// Trait to implement a backoff algorithm
     pub trait DurationBackoff: Clone {
-
+        /// Step backoff algorithm to next state
         fn step(&mut self) -> Duration;
+        /// Get current state of backoff algorithm
         fn current(&self) -> Duration;
+        /// Reset backoff algorithm to default state
         fn reset(&mut self) -> Duration;
     }
 
+    /// # LinearDurationBackoff
+    /// Implementation of a linear backoff algorithm that linearly increases the backoff duration
+    /// between two states
     #[derive(Clone)]
     pub struct LinearDurationBackoff {
         low: Duration,
@@ -134,6 +152,7 @@ pub mod time {
     }
 
     impl LinearDurationBackoff {
+        /// Create an instance that backs of between `low` and `high` in `steps` number of steps
         pub fn new(low: Duration, high: Duration, steps: u16) -> Self {
             Self {
                 low: low,
@@ -166,6 +185,9 @@ pub mod time {
         }
     }
 
+    /// # DurationBackoffWithDebounce
+    /// Duration backup implementation that debounces a given number of steps before handing over to the internal
+    /// backoff algorithm
     #[derive(Clone)]
     pub struct DurationBackoffWithDebounce<T: DurationBackoff> {
         backoff: T,
@@ -174,6 +196,7 @@ pub mod time {
     }
 
     impl<T: DurationBackoff> DurationBackoffWithDebounce<T> {
+        /// Create new instance with `backoff` algorithm with `debounce` number of debouncing before it
         pub fn new(backoff: T, debounce: usize) -> Self {
             Self {
                 backoff: backoff,
@@ -212,30 +235,38 @@ pub mod time {
     }
 }
 
+/// # Threaded operation helper functionality
+/// Timing functionality used internally by RustyMQ
 pub mod thread {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
+    /// #Sleeper
+    /// A helper struct that allows for sleeping the currrent thread according to a duration backoff algorithm
     pub struct Sleeper<T:super::time::DurationBackoff> {
         backoff: T
     }
 
     impl<T:super::time::DurationBackoff> Sleeper<T> {
+        /// Construct new sleeper with `backoff` algorithm
         pub fn new(backoff: T) -> Self {
             Self {
                 backoff: backoff
             }
         }
 
+        /// Sleep the current thread according to the next state of the backoff algorithm
         pub fn sleep(&mut self) {
             thread::sleep(self.backoff.step())
         }
 
+        /// Reset the internal backoff algorithm
         pub fn reset(&mut self) {
             self.backoff.reset();
         }
     }
 
+    /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
     pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
@@ -245,6 +276,7 @@ pub mod thread {
         }
     }
 
+    /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
     pub fn wait_for_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
         loop {
             if let Some(result) = operation() {
@@ -254,6 +286,7 @@ pub mod thread {
         }
     }
 
+    /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
     pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
@@ -264,6 +297,7 @@ pub mod thread {
         }
     }
 
+    /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
     pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
@@ -274,18 +308,22 @@ pub mod thread {
         }
     }
 
+    /// # StoppedSemaphore
+    /// Simple semaphore to signal if a thread has stopped
     #[derive(Clone)]
     pub struct StoppedSemaphore {
         semaphore: Arc<Mutex<bool>>
     }
 
     impl StoppedSemaphore {
+        /// Create semaphore
         pub fn new() -> Self {
             Self {
                 semaphore: Arc::new(Mutex::new(false))
             }
         }
-
+        
+        /// Check if semaphore has been stopped
         pub fn is_stopped(&self) -> bool {
             if let Ok(value) = self.semaphore.lock() {
                 *value
@@ -294,6 +332,7 @@ pub mod thread {
             }
         }
 
+        /// Explicity signal stopped state of semaphore
         pub fn stop(&self) {
             if let Ok(mut value) = self.semaphore.lock() {
                 *value = true
