@@ -1,3 +1,35 @@
+//! # Publisher-Subscriber communication model
+//! This module contains the socket implementation for a publisher-subscriber communication model.
+//! ## Operation
+//! The [`PublisherSocket`] is only an outward communication socket that can accept connections and every sent message
+//! will be distributed the all the connecting peers with a [`SubscriberSocket`] 
+//! ## Example
+//! ```rust
+//! use rustymq::core::socket::{Socket, InwardSocket, OutwardSocket, OpFlag};
+//! use rustymq::core::message::{Message, RawMessage}; 
+//! use rustymq::core::transport::{TransportMethod, NetworkAddress};
+//! use rustymq::model::pubsub::{PublisherSocket, SubscriberSocket};
+//! use rustymq::transport::network::tcp;
+//! # fn main() {
+//! 
+//! let mut publisher = PublisherSocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new()));
+//! let mut subscriber1 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! let mut subscriber2 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! 
+//! publisher.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
+//! subscriber1.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
+//! subscriber2.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
+//! 
+//! let payload: Vec<u8> = vec![2u8, 8u8];
+//! publisher.send(RawMessage::new(payload.clone()), OpFlag::Default);
+//! let subscriber1_result = subscriber1.receive(OpFlag::Default).unwrap().into_payload();
+//! let subscriber2_result = subscriber2.receive(OpFlag::Default).unwrap().into_payload();
+//! 
+//! assert_eq!(payload.clone(), subscriber1_result.clone());
+//! assert_eq!(payload.clone(), subscriber2_result.clone());
+//! # }
+//! ```
+
 use core::socket::{Socket, InwardSocket, OutwardSocket, SocketError, SocketInternalError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::message::{PeerId, RawMessage, MessageMetadata, Message};
