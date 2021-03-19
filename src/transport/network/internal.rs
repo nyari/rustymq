@@ -342,8 +342,7 @@ impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilde
                         manager.accept_connection(self.connection_builder.clone(), (stream, NetworkAddress::from_socket_addr(incoming_addr))).unwrap();
                         sleeper.reset();
                     },
-                    Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) || 
-                                matches!(err.kind(), std::io::ErrorKind::TimedOut) => {
+                    Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock) => {
                         break Ok(());
                     },
                     Err(err) => break Err(err)

@@ -110,7 +110,6 @@ impl RawMessageReader {
                 }
             },
             Err(err) => match err.kind() {
-                std::io::ErrorKind::TimedOut => Ok(()),
                 std::io::ErrorKind::WouldBlock => Ok(()),
                 _ => Err(State::from(err))
             }

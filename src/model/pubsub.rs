@@ -20,7 +20,11 @@
 //! subscriber1.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
 //! subscriber2.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
 //! 
+//! // Make sure that TCP connection is established otherwise the first sent message might not arrive 
+//! std::thread::sleep(std::time::Duration::from_millis(100));
+//! 
 //! let payload: Vec<u8> = vec![2u8, 8u8];
+//! 
 //! publisher.send(RawMessage::new(payload.clone()), OpFlag::Default);
 //! let subscriber1_result = subscriber1.receive(OpFlag::Default).unwrap().into_payload();
 //! let subscriber2_result = subscriber2.receive(OpFlag::Default).unwrap().into_payload();
@@ -36,7 +40,6 @@ use core::message::{PeerId, RawMessage, MessageMetadata, Message};
 
 use std::collections::{HashSet};
 
-const SUBSCRIBER_MODELID: u16 = 0xFFE0;
 const PUBLISHER_MODELID: u16 = 0xFFE1; 
 
 struct ConnectionTracker {
@@ -75,25 +78,28 @@ impl ConnectionTracker {
     }
 }
 
+/// # Subscriber socket
+/// This socket serves to connect to one or more publishers that distribute information among connected subscribers.
 pub struct SubscriberSocket<T: InitiatorTransport> {
-    channel: T,
+    transport: T,
     tracker: ConnectionTracker
 }
 
 impl<T> SubscriberSocket<T>
     where T: InitiatorTransport {
+    /// Creates a new socket that will use the given underlieing transport to send and receive messages
     pub fn new(transport: T) -> Self {
         Self {
-            channel: transport,
+            transport: transport,
             tracker: ConnectionTracker::new()
         }
     }
 
-    pub fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
+    fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
         if message.communication_model_id().unwrap() == PUBLISHER_MODELID {
             Ok(())
         } else {
-            self.channel.close_connection(PeerIdentification::PeerId(message.peer_id().unwrap())).unwrap();
+            self.transport.close_connection(PeerIdentification::PeerId(message.peer_id().unwrap())).unwrap();
             Err((Some(message.peer_id().unwrap()), SocketError::IncompatiblePeer))
         }
     }
@@ -102,12 +108,14 @@ impl<T> SubscriberSocket<T>
 impl<T> Socket for SubscriberSocket<T>
     where T: InitiatorTransport {
 
+    /// Connects to a subcriber
     fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
-        let peerid = self.channel.connect(target)?.expect("Transport did not provide peer id");
+        let peerid = self.transport.connect(target)?.expect("Transport did not provide peer id");
         self.tracker.accept_new_peer(peerid.clone())?;
         Ok(Some(peerid))
     }
 
+    /// Will return error, since a subscriber socket cannot bind for listening
     fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         Err(SocketError::NotSupportedOperation)
     }
@@ -116,19 +124,19 @@ impl<T> Socket for SubscriberSocket<T>
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.close_connection(peer_id)?;
-                self.channel.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
+                self.transport.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
                 Ok(())
             },
             PeerIdentification::TransportMethod(method) => {
-                let peer_id = (self.channel.close_connection(PeerIdentification::TransportMethod(method))?).unwrap();
-                self.tracker.close_connection(peer_id).expect("onnection existance already checked, should not happen");
+                let peer_id = (self.transport.close_connection(PeerIdentification::TransportMethod(method))?).unwrap();
+                self.tracker.close_connection(peer_id).expect("Connection existance already checked, should not happen");
                 Ok(())
             }
         }
     }
 
     fn close(self) -> Result<(), SocketError> {
-        self.channel.close().into()
+        self.transport.close().into()
     }
 }
 
@@ -136,7 +144,7 @@ impl<T> InwardSocket for SubscriberSocket<T>
     where T: InitiatorTransport {
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        match self.channel.receive(flags) {
+        match self.transport.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
                 self.tracker.check_peer_connected(message.peer_id().ok_or((None, SocketError::UnknownPeer))?).map_err(|(peerid, err)| {(peerid, SocketError::from(err))})?;
@@ -147,24 +155,18 @@ impl<T> InwardSocket for SubscriberSocket<T>
     }
 }
 
+/// # Publisher socket
+/// This socket can be used to distribute information to subscribing peers
 pub struct PublisherSocket<T: AcceptorTransport> {
-    channel: T
+    transport: T
 }
 
 impl<T> PublisherSocket<T>
     where T: AcceptorTransport {
+    /// Creates new socket with the underlieing transport to distribute messages to subscribint peers
     pub fn new(transport: T) -> Self {
         Self {
-            channel: transport
-        }
-    }
-
-    pub fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
-        if message.communication_model_id().unwrap() == SUBSCRIBER_MODELID {
-            Ok(())
-        } else {
-            self.channel.close_connection(PeerIdentification::PeerId(message.peer_id().unwrap())).unwrap();
-            Err((Some(message.peer_id().unwrap()), SocketError::IncompatiblePeer))
+            transport: transport
         }
     }
 }
@@ -177,24 +179,24 @@ impl<T> Socket for PublisherSocket<T>
     }
 
     fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
-        self.channel.bind(target)
+        self.transport.bind(target)
     }
 
     fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(_peer_id) => {
-                self.channel.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
+                self.transport.close_connection(peer_identification).expect("Connection existance already checked, should not happen");
                 Ok(())
             },
             PeerIdentification::TransportMethod(method) => {
-                self.channel.close_connection(PeerIdentification::TransportMethod(method))?.unwrap();
+                self.transport.close_connection(PeerIdentification::TransportMethod(method))?.unwrap();
                 Ok(())
             }
         }
     }
 
     fn close(self) -> Result<(), SocketError> {
-        self.channel.close()
+        self.transport.close()
     }
 }
 
@@ -204,8 +206,8 @@ impl<T> OutwardSocket for PublisherSocket<T>
     fn send(&mut self, message:RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
         let processed_message = message.commit_communication_model_id(PUBLISHER_MODELID);
         let message_metadata = processed_message.metadata().clone();
-        for peer_id in self.channel.query_connected_peers().iter() {
-            self.channel.send(processed_message.clone().apply_peer_id(peer_id.clone()), flags.clone())?;
+        for peer_id in self.transport.query_connected_peers().iter() {
+            self.transport.send(processed_message.clone().apply_peer_id(peer_id.clone()), flags.clone())?;
         };
         Ok(message_metadata)
     }

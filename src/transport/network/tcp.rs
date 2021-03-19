@@ -100,4 +100,3 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
 pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
 pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamListenerBuilder, StreamConnectionBuilder>;
-
