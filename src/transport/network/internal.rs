@@ -1,3 +1,6 @@
+//! # Internal helper module for network connections
+//! This module contains functionality to establish stream based connectons through network
+
 use core::message::{PeerId, Message, RawMessage};
 use core::util;
 use core::util::thread::{StoppedSemaphore, Sleeper};

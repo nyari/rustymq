@@ -1,3 +1,6 @@
+//! # Network transport through TCP
+//! This module contains the [`crate::core::transport::Transport`] definitions to be able to use TCP based communication
+
 use super::internal::*;
 use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
@@ -49,12 +52,15 @@ impl NetworkListener for net::TcpListener {
     }
 }
 
+/// # TCP Stream listener builder
+/// This structure is needed for constructing [`AcceptorTransport`]s to configure the underlieing TCP Listener
 #[derive(Clone)]
 pub struct StreamListenerBuilder {
 
 }
 
 impl StreamListenerBuilder {
+    /// Construct the stream listener builder
     pub fn new() -> Self {
         Self {}
     }
@@ -70,9 +76,12 @@ impl NetworkListenerBuilder for StreamListenerBuilder {
 }
 
 #[derive(Clone)]
+/// # TCP Stream connection builder
+/// This structure is needed for constructing [`AcceptorTransport`]s and [`InitiatorTransport`] to configure the unerlieing TCP stream
 pub struct StreamConnectionBuilder {}
 
 impl StreamConnectionBuilder {
+    /// Construct the stream connector builder
     pub fn new() -> Self {
         Self {}
     }
@@ -97,6 +106,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     }
 }
 
+/// TCP Initiator transport to use with TCP  based connections
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
-pub type ConnectionListener = NetworkConnectionListener<net::TcpListener, StreamConnectionBuilder>;
+/// TCP Acceptor transport to use with TCP  based connections
 pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamListenerBuilder, StreamConnectionBuilder>;

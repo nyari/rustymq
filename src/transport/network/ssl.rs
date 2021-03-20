@@ -1,3 +1,6 @@
+//! # Network transport through SSL
+//! This module contains the [`crate::core::transport::Transport`] definitions to be able to use SSL based communication
+
 use super::internal::*;
 
 use openssl::ssl::{SslConnector, SslStream, SslAcceptor};
@@ -74,11 +77,16 @@ impl NetworkListener for StreamListener {
 }
 
 #[derive(Clone)]
+/// # SSL Stream listener builder
+/// This structure is needed for constructing [`AcceptorTransport`]s to configure the underlieing SSL Listener
 pub struct StreamListenerBuilder {
     acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send>
 }
 
 impl StreamListenerBuilder {
+    /// Construct a new listener builder that allows for listening to SLL connections
+    /// The acceptor_builder is a factory function that can construct an `openssl::ssl::SslAcceptor`.
+    /// For details please see OpenSSL crate
     pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send >) -> Self {
         Self {
             acceptor_builder: acceptor_builder
@@ -97,11 +105,16 @@ impl NetworkListenerBuilder for StreamListenerBuilder {
 }
 
 #[derive(Clone)]
+/// # SSL Stream connection builder
+/// This structure is needed for constructing [`AcceptorTransport`]s and [`InitiatorTransport`] to configure the unerlieing SSL stream
 pub struct StreamConnectionBuilder {
     connector: SslConnector
 }
 
 impl StreamConnectionBuilder {
+    /// Construct a new connector builder that allows for connecting to SLL listeners
+    /// The connector parameter is an instance of an `openssl::ssl::SslConnector` that allows for creating SSL connections
+    /// For details please see OpenSSL crate
     pub fn new(connector: SslConnector) -> Self {
         Self {
             connector: connector
@@ -139,6 +152,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     }
 }
 
+/// TCP Initiator transport to use with SSL  based connections
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
-pub type ConnectionListener = NetworkConnectionListener<StreamListener, StreamConnectionBuilder>;
+/// TCP Acceptor transport to use with SSL  based connections
 pub type AcceptorTransport = NetworkAcceptorTransport<StreamListener, StreamListenerBuilder, StreamConnectionBuilder>;
