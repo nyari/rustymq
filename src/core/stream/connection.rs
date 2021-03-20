@@ -139,10 +139,9 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
 
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         let messages = self.reader.read_into(&mut self.stream)?;
-        let mut inward_queue = self.inward_queue.lock().unwrap();
-        messages.into_iter().for_each(|message| {
-            inward_queue.push_back(message);
-        });
+        if !messages.is_empty() {
+            self.inward_queue.lock().unwrap().extend(messages.into_iter());
+        }
         Ok(())
     }
 

@@ -108,8 +108,9 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn receive_from_all_connections(&self) -> Vec<Result<RawMessage, (PeerId, SocketInternalError)>> {
+    pub fn receive_from_all_connections(&mut self) -> Vec<Result<RawMessage, (PeerId, SocketInternalError)>> {
         let mut results = Vec::new();
+        let mut lost_peers = Vec::new();
         self.peer_table.iter().for_each(|(peer_id, connection)| {
             match connection.receive_async_all() {
                 (messages, None) => {
@@ -118,11 +119,14 @@ impl NetworkConnectionManagerPeers {
                 (messages, Some(err)) => {
                     if !messages.is_empty() {
                         results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(peer_id))) }));
-                        results.push(Err((peer_id.clone(), err)))
                     }
+                    results.push(Err((peer_id.clone(), err)));
+                    lost_peers.push(peer_id.clone())
                 }
             }
         });
+
+        lost_peers.into_iter().for_each(|peerid| { self.close_connection(PeerIdentification::PeerId(peerid)).unwrap(); });
         results
     }
 
@@ -228,7 +232,7 @@ impl NetworkConnectionManager {
     }
 
     fn receive_from_all_connections(&mut self) {
-        let peers = self.peers.lock().unwrap();
+        let mut peers = self.peers.lock().unwrap();
         self.inward_queue.extend(peers.receive_from_all_connections().into_iter())
     }
 }

@@ -18,6 +18,7 @@ impl From<io::Error> for SocketInternalError {
             io::ErrorKind::BrokenPipe => SocketInternalError::Disconnected,
             io::ErrorKind::ConnectionAborted => SocketInternalError::Disconnected,
             io::ErrorKind::ConnectionRefused => SocketInternalError::ConnectionRefused,
+            io::ErrorKind::ConnectionReset => SocketInternalError::Disconnected,
             io::ErrorKind::Interrupted => SocketInternalError::Disconnected,
             io::ErrorKind::InvalidData => SocketInternalError::UnknownInternalError,
             io::ErrorKind::InvalidInput => SocketInternalError::UnknownInternalError,
