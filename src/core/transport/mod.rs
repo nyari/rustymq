@@ -7,6 +7,7 @@ pub use self::network::NetworkAddress;
 use core::message::{RawMessage, PeerId};
 use core::socket::{SocketError, OpFlag, PeerIdentification};
 use std::collections::{HashSet};
+use std::any;
 
 
 /// # TransportMethod
@@ -16,8 +17,9 @@ pub enum TransportMethod
 {
     /// Connect through network
     Network(NetworkAddress),
-    /// Dummy value, should not be handled
-    Dummy
+    /// Allow implementation of custom transport methods
+    Custom(Box<dyn any::Any>)
+    
 }
 
 /// # Transport

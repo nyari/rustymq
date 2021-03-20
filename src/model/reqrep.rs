@@ -1,3 +1,42 @@
+//! # Request reply communication model
+//! This module contains the socket implementation for a request-reply communication model.
+//! ## Operation
+//! The [`ReplySocket`] listens for incoming connections and shuld reply to all incoming messages.
+//! The [`RequestSocket`] can be used to send requests to the reply sockets.
+//! ## Example
+//! ```rust
+//! use rustymq::core::socket::{Socket, InwardSocket, OutwardSocket, OpFlag, BidirectionalSocket};
+//! use rustymq::core::message::{Message, RawMessage}; 
+//! use rustymq::core::transport::{TransportMethod, NetworkAddress};
+//! use rustymq::model::reqrep::{RequestSocket, ReplySocket};
+//! use rustymq::transport::network::tcp;
+//! # fn main() {
+//! 
+//! let mut replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new()));
+//! let mut requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! 
+//! replier.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
+//! requestor.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
+//! 
+//! // Make sure that TCP connection is established otherwise the first sent message might not arrive 
+//! std::thread::sleep(std::time::Duration::from_millis(100));
+//! 
+//! let request_payload: Vec<u8> = vec![2u8, 8u8];
+//! let response_payload_requirement: Vec<u8> = vec![2u8, 8u8, 16u8, 32u8];
+//! 
+//! requestor.send(RawMessage::new(request_payload.clone()), OpFlag::Default);
+//! replier.respond(OpFlag::Default, move |message| {
+//!     let mut payload = message.into_payload();
+//!     let reply_payload_extend: Vec<u8> = vec![16u8, 32u8];
+//!     payload.extend(reply_payload_extend.into_iter());
+//!     RawMessage::new(payload)
+//! });
+//! let response_payload = requestor.receive(OpFlag::Default).unwrap().into_payload();
+//! 
+//! assert_eq!(response_payload.clone(), response_payload_requirement.clone());
+//! # }
+//! ```
+
 use core::socket::{BidirectionalSocket, Socket, InwardSocket, OutwardSocket, SocketError, SocketInternalError, OpFlag, PeerIdentification};
 use core::transport::{InitiatorTransport, AcceptorTransport, TransportMethod};
 use core::message::{PeerId, ConversationId, RawMessage, MessageMetadata, Message, Part, PartError};
@@ -153,6 +192,10 @@ impl ConnectionTracker {
     }
 }
 
+/// # Request socket
+/// This allows connections to peers running  [`ReplySockets`]. It allowed to connect to multiple
+/// reply sockets with the limitation that if multiple connections are managed then [`PeerId`]s have to be
+/// specified in the [`MessageMetadata`] in order to know which connection to send the message to.
 pub struct RequestSocket<T: InitiatorTransport> {
     transport: T,
     tracker: ConnectionTracker
@@ -160,6 +203,7 @@ pub struct RequestSocket<T: InitiatorTransport> {
 
 impl<T> RequestSocket<T>
     where T: InitiatorTransport {
+    /// Create a new request socket using the underlieing transport
     pub fn new(transport: T) -> Self {
         Self {
             transport: transport,
@@ -167,7 +211,7 @@ impl<T> RequestSocket<T>
         }
     }
 
-    pub fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
+    fn handle_received_message_model_id(&mut self, message: &RawMessage) -> Result<(), (Option<PeerId>, SocketError)> {
         if message.communication_model_id().unwrap() == REPLY_MODELID {
             Ok(())
         } else {
@@ -242,6 +286,9 @@ impl<T> BidirectionalSocket for RequestSocket<T>
 {
 }
 
+/// # Reply socket
+/// Allows for listening and responding to connections from [`RequestSocket`]s. It can handle multiple
+/// incoming connections from several different clients
 pub struct ReplySocket<T: AcceptorTransport> {
     transport: T,
     tracker: ConnectionTracker
