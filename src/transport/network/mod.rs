@@ -3,4 +3,3 @@ pub mod tcp;
 pub mod ssl;
 
 mod internal;
-pub use self::internal::*;
