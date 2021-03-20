@@ -333,7 +333,7 @@ impl<T> Socket for ReplySocket<T>
             },
             PeerIdentification::TransportMethod(method) => {
                 let peer_id = (self.transport.close_connection(PeerIdentification::TransportMethod(method))?).unwrap();
-                self.tracker.close_connection(peer_id).expect("onnection existance already checked, should not happen");
+                self.tracker.close_connection(peer_id).expect("Connection existance already checked, should not happen");
                 Ok(())
             }
         }
