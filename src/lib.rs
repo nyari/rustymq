@@ -51,7 +51,6 @@ extern crate openssl;
 pub mod core;
 pub mod model;
 pub mod transport;
-pub mod stream;
 
 #[cfg(test)]
 mod tests;

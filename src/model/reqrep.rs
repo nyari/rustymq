@@ -193,7 +193,7 @@ impl ConnectionTracker {
 }
 
 /// # Request socket
-/// This allows connections to peers running  [`ReplySockets`]. It allowed to connect to multiple
+/// This allows connections to peers running  [`ReplySocket`]s. It allowed to connect to multiple
 /// reply sockets with the limitation that if multiple connections are managed then [`PeerId`]s have to be
 /// specified in the [`MessageMetadata`] in order to know which connection to send the message to.
 pub struct RequestSocket<T: InitiatorTransport> {

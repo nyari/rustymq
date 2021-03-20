@@ -1,10 +1,10 @@
 use super::internal::*;
 use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
+use core::stream;
 
 use std::net;
 use std::io;
-use stream;
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 

@@ -4,7 +4,7 @@ use core::util::thread::{StoppedSemaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod, NetworkAddress};
 use core::socket::{SocketError, SocketInternalError, OpFlag, PeerIdentification};
-use stream;
+use core::stream;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net;

@@ -5,12 +5,12 @@ use std::net::{SocketAddr};
 
 use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
+use core::stream;
 
 use std::sync::Arc;
 
 use std::net;
 use std::io;
-use stream;
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 16;
 

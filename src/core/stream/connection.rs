@@ -3,7 +3,7 @@ use core::util;
 use core::util::thread::{StoppedSemaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketInternalError};
-use stream;
+use core::stream;
 
 use std::collections::{VecDeque, HashSet};
 use std::thread;
