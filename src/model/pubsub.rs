@@ -25,9 +25,9 @@
 //! 
 //! let payload: Vec<u8> = vec![2u8, 8u8];
 //! 
-//! publisher.send(RawMessage::new(payload.clone()), OpFlag::Default);
-//! let subscriber1_result = subscriber1.receive(OpFlag::Default).unwrap().into_payload();
-//! let subscriber2_result = subscriber2.receive(OpFlag::Default).unwrap().into_payload();
+//! publisher.send(RawMessage::new(payload.clone()), OpFlag::Wait);
+//! let subscriber1_result = subscriber1.receive(OpFlag::Wait).unwrap().into_payload();
+//! let subscriber2_result = subscriber2.receive(OpFlag::Wait).unwrap().into_payload();
 //! 
 //! assert_eq!(payload.clone(), subscriber1_result.clone());
 //! assert_eq!(payload.clone(), subscriber2_result.clone());

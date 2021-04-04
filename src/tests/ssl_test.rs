@@ -123,10 +123,10 @@ fn simple_req_rep_ssl_test() {
     let message = TypedMessage::new(base);
 
     requestor.send_typed(message, OpFlag::NoWait).unwrap();
-    replier.respond_typed(OpFlag::Default, |rmessage:TypedMessage<TestingStruct>| {
+    replier.respond_typed(OpFlag::Wait, |rmessage:TypedMessage<TestingStruct>| {
         TypedMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
     }).unwrap();
-    let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
+    let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Wait).expect("Hello");
 
     assert_eq!(base, final_message.into_payload());
 }

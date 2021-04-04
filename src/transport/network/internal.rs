@@ -103,7 +103,7 @@ impl NetworkConnectionManagerPeers {
     pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketInternalError> {
         let connection = self.get_message_peer_connection(message.peer_id())?;
         match flags {
-            OpFlag::Default => connection.send(message),
+            OpFlag::Wait => connection.send(message),
             OpFlag::NoWait => connection.send_async(message)
         }
     }
@@ -249,7 +249,7 @@ impl Transport for NetworkConnectionManager {
         };
 
         match flags {
-            OpFlag::Default => {
+            OpFlag::Wait => {
                 if let Some(inward_entry) = self.inward_queue.pop_front() {
                     inward_entry_mapper(inward_entry)
                 } else {

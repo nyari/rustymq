@@ -11,8 +11,8 @@ use std::convert::{TryFrom, TryInto, From};
 #[derive(Debug)]
 #[derive(Clone)]
 pub enum OpFlag {
-    /// Default operation mode
-    Default,
+    /// Wait for operation to finish
+    Wait,
     /// Do not wait for operation to finish. Asychronous mode
     NoWait
 }

@@ -32,11 +32,11 @@
 //!     
 //!     requestor.send(message, OpFlag::NoWait).unwrap();
 //!     
-//!     replier.respond(OpFlag::Default, |rmessage:RawMessage| {
+//!     replier.respond(OpFlag::Wait, |rmessage:RawMessage| {
 //!         RawMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
 //!     }).unwrap();
 //!     
-//!     assert_eq!(payload, requestor.receive(OpFlag::Default).unwrap().into_payload());
+//!     assert_eq!(payload, requestor.receive(OpFlag::Wait).unwrap().into_payload());
 //! }
 //! ```
 
