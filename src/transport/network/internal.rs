@@ -253,7 +253,7 @@ impl Transport for NetworkConnectionManager {
                 if let Some(inward_entry) = self.inward_queue.pop_front() {
                     inward_entry_mapper(inward_entry)
                 } else {
-                    util::thread::wait_for_backoff_mut(query_thread_default_duration_backoff(), || {
+                    util::thread::poll_backoff_mut(query_thread_default_duration_backoff(), || {
                         self.receive_from_all_connections();
                         self.inward_queue.pop_front().map(inward_entry_mapper)
                     })

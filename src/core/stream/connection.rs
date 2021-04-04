@@ -257,7 +257,7 @@ impl ReadWriteStreamConnectionManager {
         self.check_worker_state()?;
         let metadata = message.metadata().clone();
         self.handle.add_to_prio_outward_queue(message);
-        util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
+        util::thread::poll_backoff(query_thread_default_duration_backoff(), || {
             if let Err(err) = self.check_worker_state() {
                 Some(Err(err))
             } else if self.handle.check_prio_message_sent(&metadata) {

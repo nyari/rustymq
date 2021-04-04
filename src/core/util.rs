@@ -267,7 +267,7 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
-    pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
+    pub fn poll<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
@@ -277,7 +277,7 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
-    pub fn wait_for_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
+    pub fn poll_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
@@ -287,7 +287,7 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
+    pub fn poll_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
@@ -298,7 +298,7 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
+    pub fn poll_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
