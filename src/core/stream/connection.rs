@@ -1,15 +1,16 @@
-use core::message::{Message, RawMessage, MessageMetadata};
+use core::message::{RawMessage};
 use core::util;
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketInternalError};
 use core::stream;
 
-use std::collections::{VecDeque, HashSet};
+use std::collections::{VecDeque};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
 use std::cell::{RefCell};
+use std::ops::{DerefMut};
 use std::io;
 
 const BUFFER_BATCH_SIZE: usize = 2048;
@@ -23,20 +24,17 @@ fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<Linear
 
 pub struct ReadWriteStreamConnectionHandle {
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
+    prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
     inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
 }
 
 impl ReadWriteStreamConnectionHandle {
     pub fn new(outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
+               prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
                inward_queue: Arc<Mutex<VecDeque<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
         Self {
             outward_queue: outward_queue,
             prio_outward_queue: prio_outward_queue,
-            prio_sent_messages: prio_sent_messages,
             inward_queue: inward_queue
         }
     }
@@ -46,19 +44,21 @@ impl ReadWriteStreamConnectionHandle {
         outward_queue.push_back(message)
     }
 
-    pub fn add_to_prio_outward_queue(&self, message: RawMessage) {
+    pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Semaphore {
         let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
-        prio_outward_queue.push_back(message)
-    }
-
-    pub fn check_prio_message_sent(&self, metadata: &MessageMetadata) -> bool {
-        let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-        prio_sent_messages.take(metadata).is_some()
+        let semaphore = Semaphore::new();
+        prio_outward_queue.push_back((semaphore.clone(), message));
+        semaphore
     }
 
     pub fn receive_async_all(&self) -> Vec<RawMessage> {
-        let mut inward_queue = self.inward_queue.lock().unwrap();
-        inward_queue.drain(..).collect()
+        let mut exchange_queue = VecDeque::new();
+        {
+            let mut inward_queue = self.inward_queue.lock().unwrap();
+            exchange_queue.reserve(inward_queue.len());
+            std::mem::swap(inward_queue.deref_mut(), &mut exchange_queue);
+        }
+        exchange_queue.into_iter().collect()
     }
 }
 
@@ -79,8 +79,7 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
+    prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
     inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
 }
 
@@ -91,7 +90,6 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
             writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             inward_queue: Arc::new(Mutex::new(VecDeque::new()))
         }
@@ -100,11 +98,10 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     pub fn get_handle(&self) -> ReadWriteStreamConnectionHandle {
         ReadWriteStreamConnectionHandle::new(self.outward_queue.clone(),
                                              self.prio_outward_queue.clone(),
-                                             self.prio_sent_messages.clone(),
                                              self.inward_queue.clone())
     }
 
-    fn get_outward_message_from_prio_queue(&mut self) -> Option<RawMessage> {
+    fn get_outward_message_from_prio_queue(&mut self) -> Option<(Semaphore, RawMessage)> {
         let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
         prio_outward_queue.pop_front()
     }
@@ -115,26 +112,17 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     }
 
     pub fn start_next_message(&mut self) -> Result<(), stream::State> {
-        if let Some(message) = self.get_outward_message_from_prio_queue() {
-            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, true))
+        if let Some((semaphore, message)) = self.get_outward_message_from_prio_queue() {
+            Ok(self.writer = stream::RawMessageWriter::new_with_semaphore(message, BUFFER_BATCH_SIZE, semaphore))
         } else if let Some(message) = self.get_outward_message_from_normal_queue() {
-            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, false))
+            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
         } else {
             Err(stream::State::Empty)
         }
     }
 
     fn proceed_sending(&mut self) -> Result<(), stream::State> {
-        match self.writer.write_into(&mut self.stream) {
-            Err(stream::State::Empty) => {
-                if let Some(metadata) = self.writer.take_metadata() {
-                    let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-                    prio_sent_messages.insert(metadata.clone());
-                }
-                Err(stream::State::Empty)
-            }
-            _other => _other
-        }
+        self.writer.write_into(&mut self.stream)
     }
 
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
@@ -255,12 +243,11 @@ impl ReadWriteStreamConnectionManager {
 
     pub fn send(&self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
-        let metadata = message.metadata().clone();
-        self.handle.add_to_prio_outward_queue(message);
+        let completion_semaphore = self.handle.add_to_prio_outward_queue(message);
         util::thread::poll_backoff(query_thread_default_duration_backoff(), || {
             if let Err(err) = self.check_worker_state() {
                 Some(Err(err))
-            } else if self.handle.check_prio_message_sent(&metadata) {
+            } else if completion_semaphore.is_signaled() {
                 Some(Ok(()))
             } else {
                 None

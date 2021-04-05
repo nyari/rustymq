@@ -1,23 +1,35 @@
-use core::message::{RawMessage, Buffer, MessageMetadata, Message};
+use core::message::{RawMessage, Buffer};
 use core::serializer::{Serializer, FlatSerializer, BufferSlice};
+use core::util::thread::{Semaphore};
 use super::{State};
 
 use std::io::{Write};
 
 pub struct RawMessageWriter {
     buffer: Buffer,
-    metadata: Option<MessageMetadata>,
+    semaphore: Option<Semaphore>,
     batch_size: usize,
     offset: usize
 }
 
 impl RawMessageWriter {
-    pub fn new(message: RawMessage, batch_size: usize, store_metadata: bool) -> Self {
+    pub fn new(message: RawMessage, batch_size: usize) -> Self {
         Self {
             buffer: {let mut serializer = FlatSerializer::new();
                      serializer.serialize(&message);
                      serializer.finalize()},
-            metadata: if store_metadata {Some(message.into_metadata())} else {None},
+            semaphore: None,
+            batch_size: batch_size,
+            offset: 0
+        }
+    }
+
+    pub fn new_with_semaphore(message: RawMessage, batch_size: usize, semaphore: Semaphore) -> Self {
+        Self {
+            buffer: {let mut serializer = FlatSerializer::new();
+                     serializer.serialize(&message);
+                     serializer.finalize()},
+            semaphore: Some(semaphore),
             batch_size: batch_size,
             offset: 0
         }
@@ -26,14 +38,10 @@ impl RawMessageWriter {
     pub fn new_empty() -> Self {
         Self {
             buffer: Buffer::new(),
-            metadata: None,
+            semaphore: None,
             batch_size: 0,
             offset: 0
         }
-    }
-
-    pub fn take_metadata(&mut self) -> Option<MessageMetadata> {
-        self.metadata.take()
     }
 
     fn get_batch<'a>(&'a self) -> Option<BufferSlice<'a>> {
@@ -52,7 +60,10 @@ impl RawMessageWriter {
 
     fn progress_amount(&mut self, amount: usize) {
         if amount <= self.batch_size {
-            self.offset += amount
+            self.offset += amount;
+            if self.is_empty() {
+                self.semaphore.take();
+            }
         } else {
             panic!("Cannot push back more than batch size")
         }

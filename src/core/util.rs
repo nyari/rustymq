@@ -238,8 +238,15 @@ pub mod time {
 /// # Threaded operation helper functionality
 /// Timing functionality used internally by RustyMQ
 pub mod thread {
-    use std::sync::{Arc, Mutex};
-    use std::thread;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc};
+
+    #[inline]
+    pub fn sleep(sleep_time: std::time::Duration) {
+        if sleep_time.subsec_nanos() != 0 || sleep_time.as_secs() != 0 {
+            std::thread::sleep(sleep_time)
+        }
+    }
 
     /// #Sleeper
     /// A helper struct that allows for sleeping the currrent thread according to a duration backoff algorithm
@@ -257,7 +264,7 @@ pub mod thread {
 
         /// Sleep the current thread according to the next state of the backoff algorithm
         pub fn sleep(&mut self) {
-            thread::sleep(self.backoff.step())
+            sleep(self.backoff.step())
         }
 
         /// Reset the internal backoff algorithm
@@ -272,7 +279,7 @@ pub mod thread {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(sleep_time)
+            sleep(sleep_time)
         }
     }
 
@@ -282,7 +289,7 @@ pub mod thread {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(sleep_time)
+            sleep(sleep_time)
         }
     }
 
@@ -312,31 +319,25 @@ pub mod thread {
     /// Simple semaphore to signal if a thread has stopped
     #[derive(Clone)]
     pub struct Semaphore {
-        semaphore: Arc<Mutex<bool>>
+        semaphore: Arc<AtomicBool>
     }
 
     impl Semaphore {
         /// Create semaphore
         pub fn new() -> Self {
             Self {
-                semaphore: Arc::new(Mutex::new(false))
+                semaphore: Arc::new(AtomicBool::from(false))
             }
         }
         
         /// Check if semaphore has been stopped
         pub fn is_signaled(&self) -> bool {
-            if let Ok(value) = self.semaphore.lock() {
-                *value
-            } else {
-                true
-            }
+            self.semaphore.load(Ordering::Relaxed)
         }
 
         /// Explicity signal stopped state of semaphore
         pub fn signal(&self) {
-            if let Ok(mut value) = self.semaphore.lock() {
-                *value = true
-            }
+            self.semaphore.store(true, Ordering::Relaxed);
         }
     }
 
