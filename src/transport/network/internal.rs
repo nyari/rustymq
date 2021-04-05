@@ -3,7 +3,7 @@
 
 use core::message::{PeerId, Message, RawMessage};
 use core::util;
-use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod, NetworkAddress};
 use core::socket::{SocketError, SocketInternalError, OpFlag, PeerIdentification};
@@ -339,7 +339,7 @@ impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilde
         })
     }
 
-    pub fn main_loop(self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketInternalError> {
+    pub fn main_loop(self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_acceptor_thread_default_duration_backoff());
         loop { 
             loop {
@@ -356,7 +356,7 @@ impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilde
                 };
             }?;
 
-            if stop_semaphore.is_stopped() {
+            if stop_semaphore.is_signaled() {
                 break;
             }
 
@@ -373,7 +373,7 @@ pub struct NetworkAcceptorTransport<Listener, ListenerBuilder, ConnectionBuilder
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
     manager: NetworkConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), SocketInternalError>>>,
-    stop_semaphore: StoppedSemaphore,
+    stop_semaphore: Semaphore,
     listener_builder: ListenerBuilder,
     connection_builder: ConnectionBuilder,
     _listener: PhantomData<Listener>
@@ -384,7 +384,7 @@ impl<Listener, ListenerBuilder, ConnectionBuilder> NetworkAcceptorTransport<List
           ListenerBuilder: NetworkListenerBuilder<Listener=Listener>,
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
     pub fn new(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder) -> Self {
-        let stop_semaphore = StoppedSemaphore::new();
+        let stop_semaphore = Semaphore::new();
         Self {
             manager: NetworkConnectionManager::new(),
             listener_thread: None,
@@ -444,7 +444,7 @@ impl<Listener, ListenerBuilder, ConnectionBuilder> Drop for NetworkAcceptorTrans
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
 
     fn drop(&mut self) {
-        self.stop_semaphore.stop();
+        self.stop_semaphore.signal();
         self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
 }

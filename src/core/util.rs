@@ -308,14 +308,14 @@ pub mod thread {
         }
     }
 
-    /// # StoppedSemaphore
+    /// # Semaphore
     /// Simple semaphore to signal if a thread has stopped
     #[derive(Clone)]
-    pub struct StoppedSemaphore {
+    pub struct Semaphore {
         semaphore: Arc<Mutex<bool>>
     }
 
-    impl StoppedSemaphore {
+    impl Semaphore {
         /// Create semaphore
         pub fn new() -> Self {
             Self {
@@ -324,7 +324,7 @@ pub mod thread {
         }
         
         /// Check if semaphore has been stopped
-        pub fn is_stopped(&self) -> bool {
+        pub fn is_signaled(&self) -> bool {
             if let Ok(value) = self.semaphore.lock() {
                 *value
             } else {
@@ -333,16 +333,16 @@ pub mod thread {
         }
 
         /// Explicity signal stopped state of semaphore
-        pub fn stop(&self) {
+        pub fn signal(&self) {
             if let Ok(mut value) = self.semaphore.lock() {
                 *value = true
             }
         }
     }
 
-    impl Drop for StoppedSemaphore {
+    impl Drop for Semaphore {
         fn drop(&mut self) {
-            self.stop()
+            self.signal()
         }
     }
 }

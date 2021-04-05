@@ -1,6 +1,6 @@
 use core::message::{Message, RawMessage, MessageMetadata};
 use core::util;
-use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketInternalError};
 use core::stream;
@@ -185,7 +185,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
         Ok((worker, handle))
     }
 
-    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketInternalError> {
+    pub fn main_loop(mut self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
         loop {
             loop {
@@ -197,7 +197,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
                     sleeper.reset();
                 }
             }
-            if stop_semaphore.is_stopped() {
+            if stop_semaphore.is_signaled() {
                 return Ok(());
             }
             sleeper.sleep();
@@ -209,13 +209,13 @@ pub struct ReadWriteStreamConnectionManager {
     handle: ReadWriteStreamConnectionHandle,
     worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>>,
     last_error: RefCell<Option<Result<(), SocketInternalError>>>,
-    stop_semaphore: StoppedSemaphore
+    stop_semaphore: Semaphore
 }
 
 impl ReadWriteStreamConnectionManager {
     pub fn construct_from_worker_handle<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
         let (worker, handle) = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
-        let stop_semaphore = StoppedSemaphore::new();
+        let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
@@ -233,7 +233,7 @@ impl ReadWriteStreamConnectionManager {
         if let Some(last_error) = self.get_last_error() {
             last_error.clone()
         } else {
-            if self.stop_semaphore.is_stopped() {
+            if self.stop_semaphore.is_signaled() {
                 let result = match self.worker_thread.borrow_mut().take().unwrap().join() {
                     Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
                     Ok(error) => error,
@@ -281,7 +281,7 @@ impl Drop for ReadWriteStreamConnectionManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
         if self.last_error.borrow().is_none() {
-            self.stop_semaphore.stop();
+            self.stop_semaphore.signal();
             match self.worker_thread.borrow_mut().take() {
                 Some(join_handle) => { join_handle.join(); },
                 None => ()
