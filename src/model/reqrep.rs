@@ -24,14 +24,14 @@
 //! let request_payload: Vec<u8> = vec![2u8, 8u8];
 //! let response_payload_requirement: Vec<u8> = vec![2u8, 8u8, 16u8, 32u8];
 //! 
-//! requestor.send(RawMessage::new(request_payload.clone()), OpFlag::Default);
-//! replier.respond(OpFlag::Default, move |message| {
+//! requestor.send(RawMessage::new(request_payload.clone()), OpFlag::Wait);
+//! replier.respond(OpFlag::Wait, move |message| {
 //!     let mut payload = message.into_payload();
 //!     let reply_payload_extend: Vec<u8> = vec![16u8, 32u8];
 //!     payload.extend(reply_payload_extend.into_iter());
 //!     RawMessage::new(payload)
 //! });
-//! let response_payload = requestor.receive(OpFlag::Default).unwrap().into_payload();
+//! let response_payload = requestor.receive(OpFlag::Wait).unwrap().into_payload();
 //! 
 //! assert_eq!(response_payload.clone(), response_payload_requirement.clone());
 //! # }

@@ -55,10 +55,10 @@ fn simple_req_rep_tcp_test() {
     let message = TypedMessage::new(base);
 
     requestor.send_typed(message, OpFlag::NoWait).unwrap();
-    replier.respond_typed(OpFlag::Default, |rmessage:TypedMessage<TestingStruct>| {
+    replier.respond_typed(OpFlag::Wait, |rmessage:TypedMessage<TestingStruct>| {
         TypedMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
     }).unwrap();
-    let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
+    let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Wait).expect("Hello");
 
     assert_eq!(base, final_message.into_payload());
 }
@@ -101,7 +101,7 @@ fn stress_simple_req_rep_tcp_test() {
     }
 
     for _index in 0..1000 {
-        let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Default).expect("Hello");
+        let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Wait).expect("Hello");
         let (metadata, payload) = final_message.into_parts();
         let original_payload = messages.get(metadata.conversation_id()).unwrap();
         assert_eq!(original_payload.a * 2, payload.a);
@@ -125,8 +125,8 @@ fn simple_req_rep_tcp_test_disconnected_before_first_send() {
 
     replier.close().unwrap();
 
-    assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Ok(_)));
-    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
-    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Default), Err(SendTypedError::Socket(SocketError::Disconnected))));
-    //assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Default), Err(SendTypedError::Socket(SocketInternalError::Disconnected))));
+    assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Wait), Ok(_)));
+    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Wait), Err(SendTypedError::Socket(SocketError::Disconnected))));
+    assert!(matches!(requestor.send_typed(message.clone().mutated_metadata(|_x| {MessageMetadata::new()}), OpFlag::Wait), Err(SendTypedError::Socket(SocketError::Disconnected))));
+    //assert!(matches!(requestor.send_typed(message.clone(), OpFlag::Wait), Err(SendTypedError::Socket(SocketInternalError::Disconnected))));
 }

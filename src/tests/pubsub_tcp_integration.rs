@@ -59,11 +59,11 @@ fn simple_pub_sub_tcp_test() {
     let base = TestingStruct{a: 5, b: 5};
     let message = TypedMessage::new(base);
 
-    publisher1.send_typed(message.clone(), OpFlag::Default).unwrap();
-    publisher2.send_typed(message.clone(), OpFlag::Default).unwrap();
+    publisher1.send_typed(message.clone(), OpFlag::Wait).unwrap();
+    publisher2.send_typed(message.clone(), OpFlag::Wait).unwrap();
 
-    assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
-    assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
-    assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
-    assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Default).unwrap().into_payload());
+    assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Wait).unwrap().into_payload());
+    assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Wait).unwrap().into_payload());
+    assert_eq!(base, subscriber1.receive_typed::<TestingStruct>(OpFlag::Wait).unwrap().into_payload());
+    assert_eq!(base, subscriber2.receive_typed::<TestingStruct>(OpFlag::Wait).unwrap().into_payload());
 }

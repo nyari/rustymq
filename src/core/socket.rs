@@ -5,14 +5,16 @@ use core::message::{Message, RawMessage, TypedMessage, PeerId, MessageMetadata, 
 use core::transport::{TransportMethod};
 
 use std::convert::{TryFrom, TryInto, From};
+use std::ops::{Deref};
+use std::sync::{Mutex, Arc, MutexGuard};
 
 /// # Operation flags
 /// Configuration for individual send and receive calls on [`InwardSocket`]s and [`OutwardSocket`]s
 #[derive(Debug)]
 #[derive(Clone)]
 pub enum OpFlag {
-    /// Default operation mode
-    Default,
+    /// Wait for operation to finish
+    Wait,
     /// Do not wait for operation to finish. Asychronous mode
     NoWait
 }
@@ -232,6 +234,7 @@ pub trait InwardSocket : Socket {
 pub trait BidirectionalSocket: OutwardSocket + InwardSocket
 {
     /// Execute a query (send and then receive) with a raw message
+    /// This does not guaratee that the response is for the same message that was sent
     fn query(&mut self, message :RawMessage, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.send(message, flags.clone()).map_err(|error| {(None, error)})?;
         self.receive(flags)
@@ -279,4 +282,99 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
             Err(err) => Err(QueryTypedError::Receive(err))
         }
     }
+}
+
+/// # ArcSocket
+/// Wrapper around a [`Socket`] that allows for easier sharing between threads
+pub struct ArcSocket<T>
+    where T: Socket {
+    socket: Arc<Mutex<T>>
+}
+
+impl<T> Clone for ArcSocket<T>
+    where T: Socket
+{
+    fn clone(&self) -> Self {
+        Self {
+            socket: self.socket.clone()
+        }
+    }
+}
+
+impl<T> ArcSocket<T>
+    where T: Socket {
+    /// Create a new ArcSocket with an already constructed socket
+    pub fn new(socket: T) -> Self {
+        Self {
+            socket: Arc::new(Mutex::new(socket))
+        }
+    }
+
+    /// Get a mutex guard for the internal socket
+    pub fn lock_ref<'a>(&'a self) -> MutexGuard<'a, T> {
+        self.socket.lock().unwrap()
+    }
+
+    /// Perform operations on internal socket directly through a closure
+    pub fn direct<U, F: Fn(&T) -> U>(&self, func: F) -> U {
+        func(self.socket.lock().unwrap().deref())
+    }
+
+    /// Perform mutating operations on internal socket directly through a closure
+    pub fn direct_mut<U, F: FnMut(&T) -> U>(&mut self, mut func: F) -> U {
+        func(self.socket.lock().unwrap().deref())
+    }
+}
+
+impl<T> Socket for ArcSocket<T>
+    where T: Socket {
+    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        self.lock_ref().connect(target)
+    }
+
+    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        self.lock_ref().bind(target)
+    }
+    
+    fn close_connection(&mut self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
+        self.lock_ref().close_connection(peer_identification)
+    }
+    
+    fn close(self) -> Result<(), SocketError> {
+        Ok(())
+    }
+}
+
+impl<T> InwardSocket for ArcSocket<T>
+    where T: InwardSocket {
+    fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+        match flags {
+            OpFlag::Wait => {
+                super::util::thread::poll(std::time::Duration::from_millis(1), || {
+                    match self.lock_ref().receive(OpFlag::NoWait) {
+                        Ok(message) => Some(Ok(message)),
+                        Err(err) => match err {
+                            (_, SocketError::Timeout) => None,
+                            err => Some(Err(err))
+                        }
+                    }
+                })
+            },
+            OpFlag::NoWait => {
+                self.lock_ref().receive(OpFlag::NoWait)
+            }
+        }
+    }
+}
+
+impl<T> OutwardSocket for ArcSocket<T>
+    where T: OutwardSocket {
+    
+    fn send(&mut self, message:RawMessage, _flags: OpFlag) -> Result<MessageMetadata, SocketError> {
+        self.lock_ref().send(message, OpFlag::NoWait)
+    }
+}
+
+impl<T> BidirectionalSocket for ArcSocket<T>
+    where T: BidirectionalSocket {
 }

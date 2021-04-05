@@ -3,7 +3,7 @@
 
 use core::message::{PeerId, Message, RawMessage};
 use core::util;
-use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod, NetworkAddress};
 use core::socket::{SocketError, SocketInternalError, OpFlag, PeerIdentification};
@@ -19,13 +19,6 @@ use std::io;
 use std::io::{Read, Write};
 use std::iter::{FromIterator};
 use std::marker::{PhantomData};
-
-fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
-    DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
-        Duration::from_millis(0),
-        Duration::from_millis(500),
-        20), 500000)
-}
 
 fn query_acceptor_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
     DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
@@ -100,10 +93,10 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketInternalError> {
+    pub fn send_message(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketInternalError> {
         let connection = self.get_message_peer_connection(message.peer_id())?;
         match flags {
-            OpFlag::Default => connection.send(message),
+            OpFlag::Wait => connection.send(message),
             OpFlag::NoWait => connection.send_async(message)
         }
     }
@@ -111,20 +104,21 @@ impl NetworkConnectionManagerPeers {
     pub fn receive_from_all_connections(&mut self) -> Vec<Result<RawMessage, (PeerId, SocketInternalError)>> {
         let mut results = Vec::new();
         let mut lost_peers = Vec::new();
-        self.peer_table.iter().for_each(|(peer_id, connection)| {
-            match connection.receive_async_all() {
-                (messages, None) => {
-                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(peer_id))) }))
+        let received_messages: Vec<((Vec<RawMessage>, Option<SocketInternalError>), PeerId)> = self.peer_table.iter_mut().map(|(peer_id, connection)| {(connection.receive_async_all(), peer_id.clone())}).collect();
+        for item in received_messages.into_iter() {
+            match item {
+                ((messages, None), peer_id) => {
+                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(&peer_id))) }))
                 },
-                (messages, Some(err)) => {
+                ((messages, Some(err)), peer_id) => {
                     if !messages.is_empty() {
-                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(peer_id))) }));
+                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(&peer_id))) }));
                     }
                     results.push(Err((peer_id.clone(), err)));
                     lost_peers.push(peer_id.clone())
                 }
             }
-        });
+        };
 
         lost_peers.into_iter().for_each(|peerid| { self.close_connection(PeerIdentification::PeerId(peerid)).unwrap(); });
         results
@@ -151,14 +145,14 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    fn get_message_peer_connection<'a>(&'a self, peer_id: &Option<PeerId>) -> Result<&'a stream::ReadWriteStreamConnectionManager, SocketInternalError> {
+    fn get_message_peer_connection<'a>(&'a mut self, peer_id: &Option<PeerId>) -> Result<&'a mut stream::ReadWriteStreamConnectionManager, SocketInternalError> {
         match peer_id {
-            Some(peerid) => match self.peer_table.get(&peerid) {
+            Some(peerid) => match self.peer_table.get_mut(&peerid) {
                 Some(connection) => Ok(connection),
                 None => Err(SocketInternalError::UnknownPeer)
             },
             None => if self.peer_table.len() == 1 {
-                Ok(self.peer_table.values().next().unwrap())
+                Ok(self.peer_table.values_mut().next().unwrap())
             } else {
                 Err(SocketInternalError::UnknownPeer)
             }
@@ -221,8 +215,8 @@ impl NetworkConnectionManager {
         peers.connect(builder, address)
     }
 
-    pub fn send_message(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketInternalError> {
-        let peers = self.peers.lock().unwrap();
+    pub fn send_message(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketInternalError> {
+        let mut peers = self.peers.lock().unwrap();
         peers.send_message(message, flags)
     }
 
@@ -249,11 +243,11 @@ impl Transport for NetworkConnectionManager {
         };
 
         match flags {
-            OpFlag::Default => {
+            OpFlag::Wait => {
                 if let Some(inward_entry) = self.inward_queue.pop_front() {
                     inward_entry_mapper(inward_entry)
                 } else {
-                    util::thread::wait_for_backoff_mut(query_thread_default_duration_backoff(), || {
+                    util::thread::poll_mut(std::time::Duration::from_millis(1), || {
                         self.receive_from_all_connections();
                         self.inward_queue.pop_front().map(inward_entry_mapper)
                     })
@@ -339,7 +333,7 @@ impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilde
         })
     }
 
-    pub fn main_loop(self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketInternalError> {
+    pub fn main_loop(self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_acceptor_thread_default_duration_backoff());
         loop { 
             loop {
@@ -356,7 +350,7 @@ impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilde
                 };
             }?;
 
-            if stop_semaphore.is_stopped() {
+            if stop_semaphore.is_signaled() {
                 break;
             }
 
@@ -373,7 +367,7 @@ pub struct NetworkAcceptorTransport<Listener, ListenerBuilder, ConnectionBuilder
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
     manager: NetworkConnectionManager,
     listener_thread: Option<thread::JoinHandle<Result<(), SocketInternalError>>>,
-    stop_semaphore: StoppedSemaphore,
+    stop_semaphore: Semaphore,
     listener_builder: ListenerBuilder,
     connection_builder: ConnectionBuilder,
     _listener: PhantomData<Listener>
@@ -384,7 +378,7 @@ impl<Listener, ListenerBuilder, ConnectionBuilder> NetworkAcceptorTransport<List
           ListenerBuilder: NetworkListenerBuilder<Listener=Listener>,
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
     pub fn new(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder) -> Self {
-        let stop_semaphore = StoppedSemaphore::new();
+        let stop_semaphore = Semaphore::new();
         Self {
             manager: NetworkConnectionManager::new(),
             listener_thread: None,
@@ -444,7 +438,7 @@ impl<Listener, ListenerBuilder, ConnectionBuilder> Drop for NetworkAcceptorTrans
           ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream> {
 
     fn drop(&mut self) {
-        self.stop_semaphore.stop();
+        self.stop_semaphore.signal();
         self.listener_thread.take().and_then(|join_handle| {Some(join_handle.join())});
     }
 }

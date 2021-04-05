@@ -1,15 +1,15 @@
-use core::message::{Message, RawMessage, MessageMetadata};
+use core::message::{RawMessage};
 use core::util;
-use core::util::thread::{StoppedSemaphore, Sleeper};
+use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketInternalError};
 use core::stream;
 
-use std::collections::{VecDeque, HashSet};
+use std::collections::{VecDeque};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
-use std::cell::{RefCell};
+use std::ops::{DerefMut};
 use std::io;
 
 const BUFFER_BATCH_SIZE: usize = 2048;
@@ -23,20 +23,17 @@ fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<Linear
 
 pub struct ReadWriteStreamConnectionHandle {
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
-    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
+    prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
+    inward_queue: Arc<Mutex<Vec<RawMessage>>>
 }
 
 impl ReadWriteStreamConnectionHandle {
     pub fn new(outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-               prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
-               inward_queue: Arc<Mutex<VecDeque<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
+               prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
+               inward_queue: Arc<Mutex<Vec<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
         Self {
             outward_queue: outward_queue,
             prio_outward_queue: prio_outward_queue,
-            prio_sent_messages: prio_sent_messages,
             inward_queue: inward_queue
         }
     }
@@ -46,19 +43,18 @@ impl ReadWriteStreamConnectionHandle {
         outward_queue.push_back(message)
     }
 
-    pub fn add_to_prio_outward_queue(&self, message: RawMessage) {
+    pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Semaphore {
         let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
-        prio_outward_queue.push_back(message)
-    }
-
-    pub fn check_prio_message_sent(&self, metadata: &MessageMetadata) -> bool {
-        let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-        prio_sent_messages.take(metadata).is_some()
+        let semaphore = Semaphore::new();
+        prio_outward_queue.push_back((semaphore.clone(), message));
+        semaphore
     }
 
     pub fn receive_async_all(&self) -> Vec<RawMessage> {
         let mut inward_queue = self.inward_queue.lock().unwrap();
-        inward_queue.drain(..).collect()
+        let mut result = Vec::with_capacity(inward_queue.len());
+        std::mem::swap(inward_queue.deref_mut(), &mut result);
+        result
     }
 }
 
@@ -79,9 +75,8 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_sent_messages: Arc<Mutex<HashSet<MessageMetadata>>>,
-    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
+    prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
+    inward_queue: Arc<Mutex<Vec<RawMessage>>>
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
@@ -91,20 +86,18 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
             writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            prio_sent_messages: Arc::new(Mutex::new(HashSet::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            inward_queue: Arc::new(Mutex::new(VecDeque::new()))
+            inward_queue: Arc::new(Mutex::new(Vec::new()))
         }
     }
 
     pub fn get_handle(&self) -> ReadWriteStreamConnectionHandle {
         ReadWriteStreamConnectionHandle::new(self.outward_queue.clone(),
                                              self.prio_outward_queue.clone(),
-                                             self.prio_sent_messages.clone(),
                                              self.inward_queue.clone())
     }
 
-    fn get_outward_message_from_prio_queue(&mut self) -> Option<RawMessage> {
+    fn get_outward_message_from_prio_queue(&mut self) -> Option<(Semaphore, RawMessage)> {
         let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
         prio_outward_queue.pop_front()
     }
@@ -115,26 +108,17 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     }
 
     pub fn start_next_message(&mut self) -> Result<(), stream::State> {
-        if let Some(message) = self.get_outward_message_from_prio_queue() {
-            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, true))
+        if let Some((semaphore, message)) = self.get_outward_message_from_prio_queue() {
+            Ok(self.writer = stream::RawMessageWriter::new_with_semaphore(message, BUFFER_BATCH_SIZE, semaphore))
         } else if let Some(message) = self.get_outward_message_from_normal_queue() {
-            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE, false))
+            Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
         } else {
             Err(stream::State::Empty)
         }
     }
 
     fn proceed_sending(&mut self) -> Result<(), stream::State> {
-        match self.writer.write_into(&mut self.stream) {
-            Err(stream::State::Empty) => {
-                if let Some(metadata) = self.writer.take_metadata() {
-                    let mut prio_sent_messages = self.prio_sent_messages.lock().unwrap();
-                    prio_sent_messages.insert(metadata.clone());
-                }
-                Err(stream::State::Empty)
-            }
-            _other => _other
-        }
+        self.writer.write_into(&mut self.stream)
     }
 
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
@@ -185,7 +169,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
         Ok((worker, handle))
     }
 
-    pub fn main_loop(mut self, stop_semaphore: StoppedSemaphore) -> Result<(), SocketInternalError> {
+    pub fn main_loop(mut self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
         loop {
             loop {
@@ -197,7 +181,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
                     sleeper.reset();
                 }
             }
-            if stop_semaphore.is_stopped() {
+            if stop_semaphore.is_signaled() {
                 return Ok(());
             }
             sleeper.sleep();
@@ -207,39 +191,36 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 
 pub struct ReadWriteStreamConnectionManager {
     handle: ReadWriteStreamConnectionHandle,
-    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>>,
-    last_error: RefCell<Option<Result<(), SocketInternalError>>>,
-    stop_semaphore: StoppedSemaphore
+    worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
+    last_error: Option<Result<(), SocketInternalError>>,
+    stop_semaphore: Semaphore
 }
 
 impl ReadWriteStreamConnectionManager {
     pub fn construct_from_worker_handle<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
         let (worker, handle) = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
-        let stop_semaphore = StoppedSemaphore::new();
+        let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
-            worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
-            last_error: RefCell::new(None),
+            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } )),
+            last_error: None,
             stop_semaphore: stop_semaphore_clone
         })
     }
 
-    fn get_last_error(&self) -> Option<Result<(), SocketInternalError>> {
-        self.last_error.borrow().clone()
-    }
 
-    fn check_worker_state(&self) -> Result<(), SocketInternalError> {
-        if let Some(last_error) = self.get_last_error() {
+    fn check_worker_state(&mut self) -> Result<(), SocketInternalError> {
+        if let Some(last_error) = self.last_error.as_ref() {
             last_error.clone()
         } else {
-            if self.stop_semaphore.is_stopped() {
-                let result = match self.worker_thread.borrow_mut().take().unwrap().join() {
+            if self.stop_semaphore.is_signaled() {
+                let result = match self.worker_thread.take().unwrap().join() {
                     Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
                     Ok(error) => error,
                     Err(_) => Err(SocketInternalError::UnknownInternalError)
                 };
-                *self.last_error.borrow_mut() = Some(result.clone());
+                self.last_error = Some(result.clone());
                 result
             } else {
                 Ok(())
@@ -247,20 +228,19 @@ impl ReadWriteStreamConnectionManager {
         }
     }
 
-    pub fn send_async(&self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send_async(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
         self.handle.add_to_outward_queue(message);
         Ok(())
     }
 
-    pub fn send(&self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
-        let metadata = message.metadata().clone();
-        self.handle.add_to_prio_outward_queue(message);
-        util::thread::wait_for_backoff(query_thread_default_duration_backoff(), || {
+        let completion_semaphore = self.handle.add_to_prio_outward_queue(message);
+        util::thread::poll_mut(std::time::Duration::from_millis(1), || {
             if let Err(err) = self.check_worker_state() {
                 Some(Err(err))
-            } else if self.handle.check_prio_message_sent(&metadata) {
+            } else if completion_semaphore.is_signaled() {
                 Some(Ok(()))
             } else {
                 None
@@ -268,7 +248,7 @@ impl ReadWriteStreamConnectionManager {
         })
     }
 
-    pub fn receive_async_all(&self) -> (Vec<RawMessage>, Option<SocketInternalError>) {
+    pub fn receive_async_all(&mut self) -> (Vec<RawMessage>, Option<SocketInternalError>) {
         let messages = self.handle.receive_async_all();
         match self.check_worker_state() {
             Ok(()) => (messages, None),
@@ -280,9 +260,9 @@ impl ReadWriteStreamConnectionManager {
 impl Drop for ReadWriteStreamConnectionManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        if self.last_error.borrow().is_none() {
-            self.stop_semaphore.stop();
-            match self.worker_thread.borrow_mut().take() {
+        if self.last_error.is_none() {
+            self.stop_semaphore.signal();
+            match self.worker_thread.take() {
                 Some(join_handle) => { join_handle.join(); },
                 None => ()
             }

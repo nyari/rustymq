@@ -238,8 +238,15 @@ pub mod time {
 /// # Threaded operation helper functionality
 /// Timing functionality used internally by RustyMQ
 pub mod thread {
-    use std::sync::{Arc, Mutex};
-    use std::thread;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc};
+
+    #[inline]
+    pub fn sleep(sleep_time: std::time::Duration) {
+        if sleep_time.subsec_nanos() != 0 || sleep_time.as_secs() != 0 {
+            std::thread::sleep(sleep_time)
+        }
+    }
 
     /// #Sleeper
     /// A helper struct that allows for sleeping the currrent thread according to a duration backoff algorithm
@@ -257,7 +264,7 @@ pub mod thread {
 
         /// Sleep the current thread according to the next state of the backoff algorithm
         pub fn sleep(&mut self) {
-            thread::sleep(self.backoff.step())
+            sleep(self.backoff.step())
         }
 
         /// Reset the internal backoff algorithm
@@ -267,27 +274,27 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
-    pub fn wait_for<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
+    pub fn poll<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(sleep_time)
+            sleep(sleep_time)
         }
     }
 
     /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
-    pub fn wait_for_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
+    pub fn poll_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
         loop {
             if let Some(result) = operation() {
                 return result
             }
-            std::thread::sleep(sleep_time)
+            sleep(sleep_time)
         }
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn wait_for_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
+    pub fn poll_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
@@ -298,7 +305,7 @@ pub mod thread {
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn wait_for_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
+    pub fn poll_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
@@ -308,41 +315,35 @@ pub mod thread {
         }
     }
 
-    /// # StoppedSemaphore
+    /// # Semaphore
     /// Simple semaphore to signal if a thread has stopped
     #[derive(Clone)]
-    pub struct StoppedSemaphore {
-        semaphore: Arc<Mutex<bool>>
+    pub struct Semaphore {
+        semaphore: Arc<AtomicBool>
     }
 
-    impl StoppedSemaphore {
+    impl Semaphore {
         /// Create semaphore
         pub fn new() -> Self {
             Self {
-                semaphore: Arc::new(Mutex::new(false))
+                semaphore: Arc::new(AtomicBool::from(false))
             }
         }
         
         /// Check if semaphore has been stopped
-        pub fn is_stopped(&self) -> bool {
-            if let Ok(value) = self.semaphore.lock() {
-                *value
-            } else {
-                true
-            }
+        pub fn is_signaled(&self) -> bool {
+            self.semaphore.load(Ordering::Relaxed)
         }
 
         /// Explicity signal stopped state of semaphore
-        pub fn stop(&self) {
-            if let Ok(mut value) = self.semaphore.lock() {
-                *value = true
-            }
+        pub fn signal(&self) {
+            self.semaphore.store(true, Ordering::Relaxed);
         }
     }
 
-    impl Drop for StoppedSemaphore {
+    impl Drop for Semaphore {
         fn drop(&mut self) {
-            self.stop()
+            self.signal()
         }
     }
 }
