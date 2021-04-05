@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::net;
 use std::io;
 
-const SOCKET_READ_TIMEOUT_MS: u64 = 16;
+const SOCKET_READ_TIMEOUT_MS: u64 = 1;
 
 impl NetworkStream for SslStream<net::TcpStream> {}
 
@@ -132,8 +132,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         match self.connector.connect(dns_address.as_str(), stream) {
             Ok(mut ssl_stream) => { 
                 let stream_mut_ref = ssl_stream.get_mut();
-                stream_mut_ref.set_nonblocking(true)?;
-                stream_mut_ref.set_write_timeout(None)?;
+                stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
             }
@@ -145,8 +144,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
     fn accept_connection(&self, (mut stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let stream_mut_ref = stream.get_mut();
-        stream_mut_ref.set_nonblocking(true)?;
-        stream_mut_ref.set_write_timeout(None)?;
+        stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }

@@ -132,8 +132,7 @@ mod data {
 mod server {
     /// Importing to handle TypedMessages from RustyMQ
     use rustymq::core::{Message, TypedMessage};
-    use rustymq::core::socket::{BidirectionalSocket, OpFlag, SocketError, ReceiveTypedError};
-    use std::sync::{Arc, Mutex};
+    use rustymq::core::socket::{BidirectionalSocket, InwardSocket, OutwardSocket, OpFlag, ArcSocket};
     use std::thread;
 
     use super::data;
@@ -141,7 +140,7 @@ mod server {
     /// Implementation of a server that accepts messages from a Socket and handles [`data::OperationTask`]s.
     pub struct OperationServer<Socket>
         where Socket: BidirectionalSocket + 'static {
-        socket: Arc<Mutex<Socket>>
+        socket: ArcSocket<Socket>
     }
 
     impl<Socket> OperationServer<Socket>
@@ -149,7 +148,7 @@ mod server {
         /// Create a new OperationServer that listents for tasks on the `socket`
         pub fn new(socket: Socket) -> Self {
             Self {
-                socket: Arc::new(Mutex::new(socket))
+                socket: ArcSocket::new(socket)
             }
         }
 
@@ -160,21 +159,12 @@ mod server {
                 let mut result: Vec<thread::JoinHandle<()>> = Vec::new();
 
                 for _count in 0..threadcount {
-                    let socket_locked= self.socket.clone();
+                    let mut arc_socket = self.socket.clone();
                     // Create threads that handle new messages
                     result.push(thread::spawn(move || {
                         loop {
-                            // Receive message from the `socket` and break it into metadata and the input 
-                            let (metadata, input) = rustymq::core::util::thread::wait_for(std::time::Duration::from_millis(1), || {
-                                let mut socket = socket_locked.lock().unwrap();
-                                // Receive the actual message. Though the error handling is not implemented here. Any error (i. e. client disconnect)
-                                // will cause a panic because of the unwrap.
-                                match socket.receive_typed::<data::OperationTask>(OpFlag::NoWait) {
-                                    Ok(message) => Some(message),
-                                    Err(ReceiveTypedError::Socket((_, SocketError::Timeout))) => None,
-                                    _ => panic!("Unhandled error case")
-                                }
-                            }).into_parts();
+                            // Receive message from the `socket` and break it into metadata and the input. Implement it as a no waiting operation
+                            let (metadata, input) = arc_socket.receive_typed::<data::OperationTask>(OpFlag::Wait).unwrap().into_parts();
 
                             println!("Received: Peer: {}\tConversation: {}", metadata.peer_id().unwrap().get(), metadata.conversation_id().get());
 
@@ -184,22 +174,18 @@ mod server {
                                 data::OperationTask::Multiplication(v1, v2) => data::OperationResult::Success(v1 * v2)
                             };
 
-                            // Send response through a socket
-                            {
-                                let mut socket = socket_locked.lock().unwrap();
-                                // Send the actual message. Though the error handling is not implemented here. Any error (i. e. client disconnect)
-                                // will cause a panic because of the unwrap.
-                                let response_metadata = socket.send_typed::<data::OperationResult>(
-                                    // Create a typed message with the modified metadata
-                                    TypedMessage::with_metadata(
-                                        // Continue exchange on metadata (will keep conversation id but generate a new message id)
-                                        metadata.continue_exchange(),
-                                        // Set the response in the message as well
-                                        response),
-                                    // Set OpFlag to NoWait because we do not need to wait for the message to be entirely sent
-                                    OpFlag::NoWait).unwrap();
-                                println!("Responded: Peer: {}\tConversation: {}", response_metadata.peer_id().unwrap().get(), response_metadata.conversation_id().get());
-                            }
+                            // Send the actual message. Though the error handling is not implemented here. Any error (i. e. client disconnect)
+                            // will cause a panic because of the unwrap.
+                            let response_metadata = arc_socket.send_typed::<data::OperationResult>(
+                                // Create a typed message with the modified metadata
+                                TypedMessage::with_metadata(
+                                    // Continue exchange on metadata (will keep conversation id but generate a new message id)
+                                    metadata.continue_exchange(),
+                                    // Set the response in the message as well
+                                    response),
+                                // Set OpFlag to NoWait because we do not need to wait for the message to be entirely sent
+                                OpFlag::NoWait).unwrap();
+                            println!("Responded: Peer: {}\tConversation: {}", response_metadata.peer_id().unwrap().get(), response_metadata.conversation_id().get());
                         }
                     }))
                 }
@@ -253,8 +239,8 @@ mod client {
                 };
                 let message = TypedMessage::new(operation);
                 println!("Request: Conversation: {}", message.conversation_id().get());
-                self.socket.send_typed(message, OpFlag::Default).unwrap();
-                let result = self.socket.receive_typed::<data::OperationResult>(OpFlag::Default).unwrap();
+                self.socket.send_typed(message, OpFlag::Wait).unwrap();
+                let result = self.socket.receive_typed::<data::OperationResult>(OpFlag::Wait).unwrap();
                 println!("Response: Conversation: {}", result.conversation_id().get());
             }
         }
