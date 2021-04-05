@@ -9,7 +9,6 @@ use std::collections::{VecDeque};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration};
-use std::cell::{RefCell};
 use std::ops::{DerefMut};
 use std::io;
 
@@ -25,13 +24,13 @@ fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<Linear
 pub struct ReadWriteStreamConnectionHandle {
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
     prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
-    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
+    inward_queue: Arc<Mutex<Vec<RawMessage>>>
 }
 
 impl ReadWriteStreamConnectionHandle {
     pub fn new(outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
                prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
-               inward_queue: Arc<Mutex<VecDeque<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
+               inward_queue: Arc<Mutex<Vec<RawMessage>>>) -> ReadWriteStreamConnectionHandle {
         Self {
             outward_queue: outward_queue,
             prio_outward_queue: prio_outward_queue,
@@ -52,13 +51,10 @@ impl ReadWriteStreamConnectionHandle {
     }
 
     pub fn receive_async_all(&self) -> Vec<RawMessage> {
-        let mut exchange_queue = VecDeque::new();
-        {
-            let mut inward_queue = self.inward_queue.lock().unwrap();
-            exchange_queue.reserve(inward_queue.len());
-            std::mem::swap(inward_queue.deref_mut(), &mut exchange_queue);
-        }
-        exchange_queue.into_iter().collect()
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        let mut result = Vec::with_capacity(inward_queue.len());
+        std::mem::swap(inward_queue.deref_mut(), &mut result);
+        result
     }
 }
 
@@ -80,7 +76,7 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     writer: stream::RawMessageWriter,
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
     prio_outward_queue: Arc<Mutex<VecDeque<(Semaphore, RawMessage)>>>,
-    inward_queue: Arc<Mutex<VecDeque<RawMessage>>>
+    inward_queue: Arc<Mutex<Vec<RawMessage>>>
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
@@ -91,7 +87,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             writer: stream::RawMessageWriter::new_empty(),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            inward_queue: Arc::new(Mutex::new(VecDeque::new()))
+            inward_queue: Arc::new(Mutex::new(Vec::new()))
         }
     }
 
@@ -195,8 +191,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 
 pub struct ReadWriteStreamConnectionManager {
     handle: ReadWriteStreamConnectionHandle,
-    worker_thread: RefCell<Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>>,
-    last_error: RefCell<Option<Result<(), SocketInternalError>>>,
+    worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
+    last_error: Option<Result<(), SocketInternalError>>,
     stop_semaphore: Semaphore
 }
 
@@ -207,27 +203,24 @@ impl ReadWriteStreamConnectionManager {
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             handle: handle,
-            worker_thread: RefCell::new(Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } ))),
-            last_error: RefCell::new(None),
+            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } )),
+            last_error: None,
             stop_semaphore: stop_semaphore_clone
         })
     }
 
-    fn get_last_error(&self) -> Option<Result<(), SocketInternalError>> {
-        self.last_error.borrow().clone()
-    }
 
-    fn check_worker_state(&self) -> Result<(), SocketInternalError> {
-        if let Some(last_error) = self.get_last_error() {
+    fn check_worker_state(&mut self) -> Result<(), SocketInternalError> {
+        if let Some(last_error) = self.last_error.as_ref() {
             last_error.clone()
         } else {
             if self.stop_semaphore.is_signaled() {
-                let result = match self.worker_thread.borrow_mut().take().unwrap().join() {
+                let result = match self.worker_thread.take().unwrap().join() {
                     Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
                     Ok(error) => error,
                     Err(_) => Err(SocketInternalError::UnknownInternalError)
                 };
-                *self.last_error.borrow_mut() = Some(result.clone());
+                self.last_error = Some(result.clone());
                 result
             } else {
                 Ok(())
@@ -235,16 +228,16 @@ impl ReadWriteStreamConnectionManager {
         }
     }
 
-    pub fn send_async(&self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send_async(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
         self.handle.add_to_outward_queue(message);
         Ok(())
     }
 
-    pub fn send(&self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
         let completion_semaphore = self.handle.add_to_prio_outward_queue(message);
-        util::thread::poll_backoff(query_thread_default_duration_backoff(), || {
+        util::thread::poll_mut(std::time::Duration::from_millis(1), || {
             if let Err(err) = self.check_worker_state() {
                 Some(Err(err))
             } else if completion_semaphore.is_signaled() {
@@ -255,7 +248,7 @@ impl ReadWriteStreamConnectionManager {
         })
     }
 
-    pub fn receive_async_all(&self) -> (Vec<RawMessage>, Option<SocketInternalError>) {
+    pub fn receive_async_all(&mut self) -> (Vec<RawMessage>, Option<SocketInternalError>) {
         let messages = self.handle.receive_async_all();
         match self.check_worker_state() {
             Ok(()) => (messages, None),
@@ -267,9 +260,9 @@ impl ReadWriteStreamConnectionManager {
 impl Drop for ReadWriteStreamConnectionManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
-        if self.last_error.borrow().is_none() {
+        if self.last_error.is_none() {
             self.stop_semaphore.signal();
-            match self.worker_thread.borrow_mut().take() {
+            match self.worker_thread.take() {
                 Some(join_handle) => { join_handle.join(); },
                 None => ()
             }
