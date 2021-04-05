@@ -240,8 +240,9 @@ mod client {
                 let message = TypedMessage::new(operation);
                 println!("Request: Conversation: {}", message.conversation_id().get());
                 self.socket.send_typed(message, OpFlag::Wait).unwrap();
-                let result = self.socket.receive_typed::<data::OperationResult>(OpFlag::Wait).unwrap();
-                println!("Response: Conversation: {}", result.conversation_id().get());
+                while let Ok(result) = self.socket.receive_typed::<data::OperationResult>(OpFlag::NoWait) {
+                    println!("Response: Conversation: {}", result.conversation_id().get());
+                } 
             }
         }
     }
