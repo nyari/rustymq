@@ -7,6 +7,7 @@ authors = ["David Tamas Nyari <dev@dnyari.info>"]
 clap = { version = "2.33.*" }
 rustymq = { path = "../..", version="0.0.1"}
 rand = "0.7.*"
+lazy_static = "1.4.*"
 
 [profile.dev]
 opt-level = 0
