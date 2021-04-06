@@ -1,10 +1,10 @@
 //! # Socket module
 //! This module contains the traits serving as the main interaction point for RustyMQ
 
-use core::message::{Message, RawMessage, TypedMessage, PeerId, MessageMetadata, Buffer};
+use core::message::{Message, RawMessage, TypedMessage, PeerId, MessageMetadata, SerializableMessagePayload};
 use core::transport::{TransportMethod};
 
-use std::convert::{TryFrom, TryInto, From};
+use std::convert::{TryFrom, From};
 use std::ops::{Deref};
 use std::sync::{Mutex, Arc, MutexGuard};
 
@@ -137,7 +137,7 @@ pub enum PeerIdentification {
 
 /// Result type for a typed sending operation
 #[derive(Debug)]
-pub enum SendTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as TryInto<Buffer>>::Error : std::fmt::Debug {
+pub enum SendTypedError<T> where T: SerializableMessagePayload {
     /// Issue was related to the socket during the sending operation
     Socket(SocketError),
     /// Issue happened during the serialization of the typed value
@@ -146,25 +146,23 @@ pub enum SendTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as T
 
 /// Result type for a typed receive operation
 #[derive(Debug)]
-pub enum ReceiveTypedError<T> where T: TryInto<Buffer>, Buffer: TryInto<T>, <Buffer as TryInto<T>>::Error : std::fmt::Debug {
+pub enum ReceiveTypedError<T> where T: SerializableMessagePayload {
     /// Issue was related to the socked during the receiving operation
     Socket((Option<PeerId>, SocketError)),
     /// Issue happened during the deserialization of the received typed value
     Conversion(<TypedMessage<T> as TryFrom<RawMessage>>::Error)
 }
 
-/// Result type for a typed query operation (a send operation followed by a received operation)
+/// Result type for a typed query operation (a send and receive operation in some order consecutively)
 #[derive(Debug)]
-pub enum QueryTypedError<T> 
-    where T: TryInto<Buffer>,
-          Buffer: TryInto<T>,
-          <T as TryInto<Buffer>>::Error : std::fmt::Debug,
-          <Buffer as TryInto<T>>::Error : std::fmt::Debug
+pub enum QueryTypedError<SEND, RECIEVE> 
+    where SEND: SerializableMessagePayload,
+          RECIEVE: SerializableMessagePayload
 {
     /// Issue happened during the sending operation. For details please see [`SendTypedError`]
-    Send(SendTypedError<T>),
+    Send(SendTypedError<SEND>),
     /// Issue happened during the receiveing operation. For details please see [`ReceiveTypedError`]
-    Receive(ReceiveTypedError<T>)
+    Receive(ReceiveTypedError<RECIEVE>)
 }
 
 /// # General **Socket** trait
@@ -191,10 +189,9 @@ pub trait OutwardSocket : Socket {
     /// Send a raw message
     fn send(&mut self, message:RawMessage, flags:OpFlag) -> Result<MessageMetadata, SocketError>;
 
-    /// Send a typed message. Requires T to be covertable to the [`RawMessage`] type
+    /// Send a typed message. Requires T to implement the SerializableMessagePayload trait
     fn send_typed<T>(&mut self, message:TypedMessage<T>, flags: OpFlag) -> Result<MessageMetadata, SendTypedError<T>>
-        where T:TryInto<Buffer> + TryFrom<Buffer>,
-              <T as TryInto<Buffer>>::Error: std::fmt::Debug 
+        where T: SerializableMessagePayload
     {
         match RawMessage::try_from(message) {
             Ok(msg) => match self.send(msg, flags) {
@@ -213,10 +210,9 @@ pub trait InwardSocket : Socket {
     /// Receive a raw message
     fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
 
-    /// Receive a typed message. Requires [`RawMessage`] to be convertible into T
+    /// Receive a typed message. Requires T to implement the SerializableMessagePayload trait
     fn receive_typed<T>(&mut self, flags:OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>>
-        where T:TryInto<Buffer> + TryFrom<Buffer>,
-              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
+        where T: SerializableMessagePayload
     {
         match self.receive(flags) {
             Ok(msg) => match TypedMessage::try_from(msg) {
@@ -240,11 +236,10 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         self.receive(flags)
     }
 
-    /// Execute a query (send and then receive) with a typed message. Requires T to be convertibe to and from RawMessage
-    fn query_typed<T>(&mut self, message:TypedMessage<T>, flags:OpFlag) -> Result<TypedMessage<T>, QueryTypedError<T>>
-        where T:TryInto<Buffer> + TryFrom<Buffer>,
-              <T as TryInto<Buffer>>::Error: std::fmt::Debug,
-              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
+    /// Execute a query (send and then receive) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
+    fn query_typed<S, R>(&mut self, message:TypedMessage<S>, flags:OpFlag) -> Result<TypedMessage<R>, QueryTypedError<S, R>>
+        where S: SerializableMessagePayload,
+              R: SerializableMessagePayload
     {
         match self.send_typed(message, flags.clone()) {
             Ok(_) => match self.receive_typed(flags) {
@@ -264,12 +259,10 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
         Ok(())
     }
 
-    /// Respond to a query (receive and then reply) with a typed message. Requires T to be convertibe to and from RawMessage
-    fn respond_typed<T, Q: Fn(TypedMessage<T>) -> TypedMessage<T>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<T>>
-        where T:TryInto<Buffer> + TryFrom<Buffer>,
-              <T as TryInto<Buffer>>::Error: std::fmt::Debug,
-              <T as TryFrom<Buffer>>::Error: std::fmt::Debug 
-
+    /// Respond to a query (receive and then reply) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
+    fn respond_typed<R, S, Q: Fn(TypedMessage<R>) -> TypedMessage<S>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<S, R>>
+        where R: SerializableMessagePayload,
+              S: SerializableMessagePayload
     {
         match self.receive_typed(flags.clone()) {
             Ok(msg) => {
