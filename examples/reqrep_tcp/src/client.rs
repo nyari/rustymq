@@ -5,6 +5,7 @@ use rand::Rng;
 /// Importing to handle TypedMessages from RustyMQ
 use rustymq::core::message::{TypedMessage, Message};
 use rustymq::core::socket::{BidirectionalSocket, OpFlag};
+use super::time::{Duration};
 
 use super::data;
 
@@ -36,11 +37,12 @@ impl<Socket> OperationClient<Socket>
                 },
                 _ => panic!("Impossible random")
             };
-            let message = TypedMessage::new(operation);
+            let message = TypedMessage::new(data::TimedOperation(operation, Duration::now()));
             println!("Request: Conversation: {}", message.conversation_id().get());
             self.socket.send_typed(message, OpFlag::Wait).unwrap();
-            while let Ok(result) = self.socket.receive_typed::<data::OperationResult>(OpFlag::NoWait) {
-                println!("Response: Conversation: {}", result.conversation_id().get());
+            while let Ok(result) = self.socket.receive_typed::<data::TimedOperation<data::OperationResult>>(OpFlag::NoWait) {
+                let elapsed_duration = Duration::now().0 - result.payload().1.0;
+                println!("Response: Conversation: {}. Elapsed milisecs: {}", result.conversation_id().get(), elapsed_duration.as_millis());
             } 
         }
     }

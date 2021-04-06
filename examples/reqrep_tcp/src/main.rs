@@ -39,7 +39,7 @@ fn main() {
         let mut socket = ReplySocket::new(AcceptorTransport::new(StreamConnectionBuilder::new(), StreamListenerBuilder::new()));
         socket.bind(transport_method).unwrap();
         let server = server::OperationServer::new(socket);
-        server.execute_threads(1);
+        server.execute_threads(8);
     } else if arguments.value_of("mode").unwrap() == "client".to_string() {
         let mut socket = RequestSocket::new(InitiatorTransport::new(StreamConnectionBuilder::new()));
         socket.connect(transport_method).unwrap();

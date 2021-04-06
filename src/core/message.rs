@@ -8,7 +8,7 @@
 use std;
 use std::convert::{TryFrom};
 use std::ops::{Deref, DerefMut};
-use core::serializer::{Serializable, Serializer, Deserializer};
+use core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer};
 use core::serializer;
 
 use core::util::Identifier;
@@ -619,6 +619,24 @@ pub trait SerializableMessagePayload : Sized {
     fn serialize(self) -> Result<Buffer, Self::SerializationError>;
     /// Deserialize a binary buffer into Self
     fn deserialize<'a>(buffer: BufferSlice<'a>) -> Result<Self, Self::DeserializationError>;
+}
+
+/// Blanket implementation for all [`Serializable`] traits to be used as a SerializableMessagePayload using [`FlatSerializer`]
+impl<T> SerializableMessagePayload for T
+    where T: Serializable {
+    type SerializationError = ();
+    type DeserializationError = serializer::Error;
+
+    fn serialize(self) -> Result<Buffer, Self::SerializationError> {
+        let mut serializer = FlatSerializer::new();
+        serializer.serialize_pass(self);
+        Ok(serializer.finalize())
+    }
+
+    fn deserialize<'a>(buffer: BufferSlice<'a>) -> Result<Self, Self::DeserializationError> {
+        let mut deserializer = FlatDeserializer::new(buffer)?;
+        Ok(T::deserialize(&mut deserializer)?)
+    }
 }
 
 /// Typed message is a generic implementation for a Message trait with custom type

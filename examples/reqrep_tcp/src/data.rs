@@ -1,12 +1,13 @@
 //! # Data module
 //! This module is used to define the datastructure between the client and server and implements serialization
 
-use std::convert::TryFrom;
-use std::time::{Duration};
+use rustymq::core::message::SerializableMessagePayload;
 
 /// For serialization in this example the internal serializer of RusyMQ is used. Although it is possible to use
 /// any serializaton method or library.
-use rustymq::core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error, Buffer};
+use rustymq::core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error, Buffer, BufferSlice};
+use super::time::{Duration};
+use std::time;
 
 /// Create a Serializable trait locally is well because we cannot implement Serializable trait from external crate on Duration from external crate (E0117)
 trait LocalSerializable : Sized {
@@ -88,59 +89,26 @@ impl Serializable for OperationResult {
     }
 }
 
-/// Implement serializable for Duration
-impl LocalSerializable for Duration {
-    /// Serialize `self` into `serializer`
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
-        serializer.serialize_raw(&self.as_secs());
-        serializer.serialize_raw(&self.subsec_nanos());
-    }
-    /// Deserialize a value with the type of `Self` from a deserializer
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, Error> {
-        Ok(Self::new(deserializer.deserialize_raw()?, deserializer.deserialize_raw()?))
-    }
-}
+#[derive(Debug)]
+pub struct TimedOperation<T>(pub T, pub Duration) where T: Serializable;
 
-impl<T, U> LocalSerializable for (T, U) 
-    where T: Serializable,
-          U: Serializable {
+impl<T> SerializableMessagePayload for TimedOperation<T>
+    where T: Serializable {
+    type SerializationError = ();
+    type DeserializationError = Error;
 
-}
-
-/// Implement the TryFrom<Buffer> for OperationTask to be able to use it in [`TypedMessage`]s. 
-impl TryFrom<Buffer> for OperationTask {
-    type Error = Error;
-    fn try_from(value: Buffer) -> Result<Self, Self::Error> {
-        let mut deserializer = FlatDeserializer::new(value.as_slice())?;
-        deserializer.deserialize::<Self>()
-    }
-}
-
-/// Implement the TryFrom<Buffer> for OperationTask to be able to use it in [`TypedMessage`]s. 
-impl TryFrom<OperationTask> for Buffer {
-    type Error = Error;
-    fn try_from(value: OperationTask) -> Result<Self, Self::Error> {
+    fn serialize(self) -> Result<Buffer, Self::SerializationError> {
         let mut serializer = FlatSerializer::new();
-        serializer.serialize_pass(value);
+        serializer.serialize(&self.0);
+        serializer.serialize::<u64>(&self.1.as_secs());
+        serializer.serialize::<u32>(&self.1.subsec_nanos());
         Ok(serializer.finalize())
     }
-}
-
-/// Implement the TryFrom<Buffer> for OperationResult to be able to use it in [`TypedMessage`]s. 
-impl TryFrom<Buffer> for OperationResult {
-    type Error = Error;
-    fn try_from(value: Buffer) -> Result<Self, Error> {
-        let mut deserializer = FlatDeserializer::new(value.as_slice())?;
-        deserializer.deserialize::<Self>()
-    }
-}
-
-/// Implement the TryFrom<Buffer> for OperationResult to be able to use it in [`TypedMessage`]s. 
-impl TryFrom<OperationResult> for Buffer {
-    type Error = Error;
-    fn try_from(value: OperationResult) -> Result<Self, Error> {
-        let mut serializer = FlatSerializer::new();
-        serializer.serialize_pass(value);
-        Ok(serializer.finalize())
+    fn deserialize<'a>(buffer: BufferSlice<'a>) -> Result<Self, Self::DeserializationError> {
+        let mut deserializer = FlatDeserializer::new(buffer)?;
+        let operation: T = deserializer.deserialize()?;
+        let dur_secs: u64 = deserializer.deserialize()?;
+        let dur_nanos: u32 = deserializer.deserialize()?;
+        Ok(Self(operation, Duration::new(time::Duration::new(dur_secs, dur_nanos))))
     }
 }
