@@ -1,44 +1,9 @@
 pub use super::super::*;
 
+use super::common::*;
 use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket};
-use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
-use core::serializer;
 use core::transport::{NetworkAddress};
-use core::message::{TypedMessage, Buffer, Message};
-
-use std::convert::{TryFrom};
-
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
-#[derive(Copy)]
-struct TestingStruct {
-    pub a: u64,
-    pub b: u64
-}
-
-impl TryFrom<TestingStruct> for Buffer {
-    type Error = ();
-    fn try_from(value: TestingStruct) -> Result<Self, Self::Error> {
-        let mut serializer = FlatSerializer::new();
-        serializer.serialize_raw(&value.a);
-        serializer.serialize_raw(&value.b);
-        Ok(serializer.finalize())
-    }
-}
-
-impl TryFrom<Buffer> for TestingStruct {
-    type Error = serializer::Error;
-    fn try_from(value: Buffer) -> Result<Self, Self::Error> {
-        let mut deserializer = FlatDeserializer::new(value.as_slice())?;
-
-        Ok(Self {
-            a: deserializer.deserialize_raw::<u64>()?,
-            b: deserializer.deserialize_raw::<u64>()?
-        })
-    }
-}
-
+use core::message::{TypedMessage, Message};
 
 #[test]
 fn simple_pub_sub_tcp_test() {

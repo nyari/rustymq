@@ -6,13 +6,13 @@
 //! All the datastructures, traits and enums needed to compose messages for sending and then
 //! receiving are defined here
 use std;
-use std::convert::{TryInto, TryFrom};
+use std::convert::{TryFrom};
 use std::ops::{Deref, DerefMut};
 use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
 
 use core::util::Identifier;
-pub use core::serializer::Buffer;
+pub use core::serializer::{Buffer, BufferSlice};
 
 /// # Multipart message part identifier
 /// Enum for tracking multipart messages
@@ -608,17 +608,30 @@ impl Message for RawMessage {
     }
 }
 
+/// Implementing this trait on a struct allows for using a [`TypedMessage`] with the struct 
+pub trait SerializableMessagePayload : Sized {
+    /// Associated type for the possible error during serialization
+    type SerializationError: std::fmt::Debug;
+    /// Associated type for the possible error during deserialization
+    type DeserializationError: std::fmt::Debug;
+
+    /// Serialize Self into a binary buffer
+    fn serialize(self) -> Result<Buffer, Self::SerializationError>;
+    /// Deserialize a binary buffer into Self
+    fn deserialize<'a>(buffer: BufferSlice<'a>) -> Result<Self, Self::DeserializationError>;
+}
+
 /// Typed message is a generic implementation for a Message trait with custom type
 #[derive(Clone)]
 pub struct TypedMessage<T>
-    where T: TryInto<Buffer>, Buffer: TryInto<T>
+    where T: SerializableMessagePayload
 {
     meta: MessageMetadata,
     payload: T
 }
 
 impl<T> TypedMessage<T>
-    where T: TryInto<Buffer>, Buffer: TryInto<T>
+    where T: SerializableMessagePayload
 {
     pub fn mutated_payload(self, mutator: &dyn Fn(T) -> T) -> Self {
         Self {
@@ -629,7 +642,7 @@ impl<T> TypedMessage<T>
 }
 
 impl<T> Message for TypedMessage<T>
-    where T: TryInto<Buffer>, Buffer: TryInto<T>
+    where T: SerializableMessagePayload
 {
     type Payload = T;
 
@@ -669,37 +682,35 @@ impl<T> Message for TypedMessage<T>
 }
 
 impl<T> TryFrom<TypedMessage<T>> for RawMessage
-    where T: TryInto<Buffer>, Buffer: TryInto<T>, <T as TryInto<Buffer>>::Error : std::fmt::Debug
+    where T: SerializableMessagePayload
 {
-    type Error = <T as TryInto<Buffer>>::Error;
+    type Error = T::SerializationError;
 
     fn try_from(value: TypedMessage<T>) -> Result<Self, Self::Error> {
-        let meta = value.metadata().clone();
-        let payload: Buffer = value.into_payload().try_into()?;
+        let (meta, payload) = value.into_parts();
         Ok(Self {
             meta: meta,
-            payload: payload
+            payload: payload.serialize()?
         })
     }
 }
 
 impl<T> TryFrom<RawMessage> for TypedMessage<T>
-    where T: TryInto<Buffer>, Buffer: TryInto<T>, <Buffer as TryInto<T>>::Error : std::fmt::Debug
+    where T: SerializableMessagePayload
 {
-    type Error = <Buffer as TryInto<T>>::Error;
+    type Error = T::DeserializationError;
 
     fn try_from(value: RawMessage) -> Result<Self, Self::Error> {
-        let meta = value.metadata().clone();
-        let payload: T = value.into_payload().try_into()?;
+        let (meta, payload) = value.into_parts();
         Ok(Self {
             meta: meta,
-            payload: payload
+            payload: T::deserialize(&payload)?
         })
     }
 }
 
 impl<T> Deref for TypedMessage<T>
-    where T: TryInto<Buffer> + TryFrom<Buffer>
+    where T: SerializableMessagePayload
 {
     type Target = T;
 
@@ -709,7 +720,7 @@ impl<T> Deref for TypedMessage<T>
 }
 
 impl<T> DerefMut for TypedMessage<T> 
-    where T: TryInto<Buffer> + TryFrom<Buffer>
+    where T: SerializableMessagePayload
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.payload
