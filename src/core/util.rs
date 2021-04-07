@@ -239,7 +239,7 @@ pub mod time {
 /// Timing functionality used internally by RustyMQ
 pub mod thread {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc};
+    use std::sync::{Arc, Condvar, Mutex, LockResult, MutexGuard, WaitTimeoutResult, PoisonError};
 
     #[inline]
     pub fn sleep(sleep_time: std::time::Duration) {
@@ -344,6 +344,59 @@ pub mod thread {
     impl Drop for Semaphore {
         fn drop(&mut self) {
             self.signal()
+        }
+    }
+
+    pub struct ChangeNotifyVariable<T> 
+        where T: Send + Sync {
+        value: Mutex<T>,
+        var: Condvar
+    }
+
+    impl<T> ChangeNotifyVariable<T>
+        where T: Send + Sync {
+        pub fn new(value: T) -> Arc<Self> {
+            Arc::new(Self {
+                value: Mutex::new(value),
+                var: Condvar::new()
+            })
+        }
+
+        pub fn lock<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
+            self.value.lock()
+        }
+
+        pub fn wait<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
+            self.wait_on_locked(self.value.lock()?)
+        }
+
+        pub fn wait_on_locked<'a>(&'a self, guard: MutexGuard<'a, T>) -> LockResult<MutexGuard<'a, T>> {
+            self.var.wait(guard)
+        } 
+
+        pub fn wait_while<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, condition: F) -> LockResult<MutexGuard<'a, T>> {
+            self.wait_while_on_locked(self.value.lock()?, condition)
+        }
+
+        pub fn wait_while_on_locked<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, guard: MutexGuard<'a, T>, condition: F) -> LockResult<MutexGuard<'a, T>> {
+            self.var.wait_while(guard, condition)
+        }
+
+        pub fn wait_timeout<'a>(&'a self, dur: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            self.wait_timeout_on_locked(match self.value.lock() {
+                Ok(guard) => Ok(guard),
+                Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None)))
+            }?, dur)
+        }
+
+        pub fn wait_timeout_on_locked<'a>(&'a self, mutex_guard: MutexGuard<'a, T>, dur: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            match self.var.wait_timeout(mutex_guard, dur) {
+                Ok((guard, timeout)) => Ok((guard, Some(timeout))),
+                Err(poison_error) => {
+                    let (guard, timeout) = poison_error.into_inner();
+                    Err(PoisonError::new((guard, Some(timeout))))
+                }
+            }
         }
     }
 }
