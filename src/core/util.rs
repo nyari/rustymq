@@ -347,13 +347,54 @@ pub mod thread {
         }
     }
 
-    pub struct ChangeNotifyVariable<T> 
+    pub struct ChangeNotifyMutexGuard<'a, T> 
+        where T: Send + Sync {
+        internal_mutex_guard: MutexGuard<'a, T>,
+        mutex: &'a ChangeNotifyMutex<T>
+    }
+
+    impl<'a, T> ChangeNotifyMutexGuard<'a, T> 
+        where T: Send + Sync {
+        pub fn new(mutex: &'a ChangeNotifyMutex<T>) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
+            let internal_mutex_guard = mutex.lock()?;
+            Ok(Self {
+                internal_mutex_guard: internal_mutex_guard,
+                mutex: mutex
+            })
+        }
+    }
+
+    impl<'a, T> Drop for ChangeNotifyMutexGuard<'a, T>
+        where T: Send + Sync {
+        fn drop(&mut self) {
+            self.mutex.notify_all();
+        }
+    }
+
+    impl<'a, T> std::ops::Deref for ChangeNotifyMutexGuard<'a, T>
+        where T: Send + Sync {
+        type Target = T;
+        fn deref(&self) -> &Self::Target {
+            self.internal_mutex_guard.deref()
+        }
+    }
+
+    impl<'a, T> std::ops::DerefMut for ChangeNotifyMutexGuard<'a, T>
+        where T: Send + Sync {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            self.internal_mutex_guard.deref_mut()
+        }
+    }
+
+    pub struct ChangeNotifyMutex<T> 
         where T: Send + Sync {
         value: Mutex<T>,
         var: Condvar
     }
 
-    impl<T> ChangeNotifyVariable<T>
+    pub type ChgNtfMutex<T> = ChangeNotifyMutex<T>; 
+
+    impl<T> ChangeNotifyMutex<T>
         where T: Send + Sync {
         pub fn new(value: T) -> Arc<Self> {
             Arc::new(Self {
@@ -364,6 +405,10 @@ pub mod thread {
 
         pub fn lock<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
             self.value.lock()
+        }
+
+        pub fn lock_notify<'a>(&'a self) -> Result<ChangeNotifyMutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>> {
+           ChangeNotifyMutexGuard::new(&self) 
         }
 
         pub fn wait<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
@@ -397,6 +442,32 @@ pub mod thread {
                     Err(PoisonError::new((guard, Some(timeout))))
                 }
             }
+        }
+
+        pub fn notify_one(&self) {
+            self.var.notify_one();
+        }
+
+        pub fn notify_all(&self) {
+            self.var.notify_all();
+        }
+
+        pub fn change_and_notify_all<'a, U, F: Fn(MutexGuard<'a, T>) -> U>(&'a self, operation: F) -> Result<U, LockResult<MutexGuard<'a, T>>> {
+            let result = match self.value.lock() {
+                Ok(guard) => Ok(operation(guard)),
+                Err(err) => Err(Err(err))
+            };
+            self.var.notify_all();
+            result
+        }
+
+        pub fn change_mut_and_notify_all<'a, U, F: FnMut(MutexGuard<'a, T>) -> U>(&'a self, mut operation: F) -> Result<U, LockResult<MutexGuard<'a, T>>> {
+            let result = match self.value.lock() {
+                Ok(guard) => Ok(operation(guard)),
+                Err(err) => Err(Err(err))
+            };
+            self.var.notify_all();
+            result
         }
     }
 }

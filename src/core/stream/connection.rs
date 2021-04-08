@@ -1,6 +1,6 @@
 use core::message::{RawMessage};
 use core::util;
-use core::util::thread::{Semaphore, Sleeper};
+use core::util::thread::{Semaphore, Sleeper, ChgNtfMutex};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::socket::{SocketInternalError};
 use core::stream;
@@ -19,6 +19,71 @@ fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<Linear
         Duration::from_millis(0),
         Duration::from_millis(500),
         20), 500000)
+}
+
+#[derive(Clone)]
+pub struct BidirectionalMessageQueue {
+    outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
+    prio_outward_queue: Arc<Mutex<VecDeque<(Arc<ChgNtfMutex<bool>>, RawMessage)>>>,
+    outward_queues_modified: Arc<ChgNtfMutex<()>>,
+    inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>
+}
+
+impl BidirectionalMessageQueue {
+    pub fn new() -> Self{
+        Self {
+            outward_queue: Arc::new(Mutex::new(VecDeque::new())),
+            prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
+            outward_queues_modified: ChgNtfMutex::new(()),
+            inward_queue: ChgNtfMutex::new(VecDeque::new())
+        }
+    }
+
+    pub fn add_to_outward_queue(&self, message: RawMessage) {
+        let mut outward_queue = self.outward_queue.lock().unwrap();
+        outward_queue.push_back(message);
+        self.outward_queues_modified.notify_all()
+    }
+
+    pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Arc<ChgNtfMutex<bool>> {
+        let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
+        let semaphore = ChgNtfMutex::new(false);
+        prio_outward_queue.push_back((semaphore.clone(), message));
+        self.outward_queues_modified.notify_all();
+        semaphore
+    }
+
+    pub fn wait_for_output_queue_change(&self, timeout: Duration) {
+        #[allow(unused_must_use)] {
+            self.outward_queues_modified.wait_timeout(timeout).unwrap();
+        }
+    }
+
+    pub fn add_to_inward_queue(&self, message: RawMessage) {
+        let mut inward_queue = self.inward_queue.lock_notify().unwrap();
+        inward_queue.push_back(message)
+    }
+
+    pub fn receive_async_all(&self) -> Vec<RawMessage> {
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        inward_queue.drain(..).collect()
+    }
+
+    pub fn receive_async_one(&self) -> Option<RawMessage> {
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        inward_queue.pop_front()
+    }
+
+    pub fn receive_one_timeout(&self, timeout: Duration) -> Option<RawMessage> {
+        let mut inward_queue = self.inward_queue.lock().unwrap();
+        match inward_queue.pop_front() {
+            Some(message) => Some(message),
+            None => {
+                let (mut invard_queue, _timeout_handle) = self.inward_queue.wait_timeout_on_locked(inward_queue, timeout).unwrap();
+                invard_queue.pop_front()
+            } 
+        }
+    }
 }
 
 pub struct ReadWriteStreamConnectionHandle {
