@@ -349,7 +349,7 @@ pub mod thread {
 
     pub struct ChangeNotifyMutexGuard<'a, T> 
         where T: Send + Sync {
-        internal_mutex_guard: MutexGuard<'a, T>,
+        internal_mutex_guard: Option<MutexGuard<'a, T>>,
         mutex: &'a ChangeNotifyMutex<T>
     }
 
@@ -358,7 +358,7 @@ pub mod thread {
         pub fn new(mutex: &'a ChangeNotifyMutex<T>) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
             let internal_mutex_guard = mutex.lock()?;
             Ok(Self {
-                internal_mutex_guard: internal_mutex_guard,
+                internal_mutex_guard: Some(internal_mutex_guard),
                 mutex: mutex
             })
         }
@@ -367,6 +367,9 @@ pub mod thread {
     impl<'a, T> Drop for ChangeNotifyMutexGuard<'a, T>
         where T: Send + Sync {
         fn drop(&mut self) {
+            #[allow(unused_must_use)]{
+                self.internal_mutex_guard.take().unwrap();
+            }
             self.mutex.notify_all();
         }
     }
@@ -375,14 +378,14 @@ pub mod thread {
         where T: Send + Sync {
         type Target = T;
         fn deref(&self) -> &Self::Target {
-            self.internal_mutex_guard.deref()
+            self.internal_mutex_guard.as_ref().unwrap().deref()
         }
     }
 
     impl<'a, T> std::ops::DerefMut for ChangeNotifyMutexGuard<'a, T>
         where T: Send + Sync {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            self.internal_mutex_guard.deref_mut()
+            self.internal_mutex_guard.as_mut().unwrap().deref_mut()
         }
     }
 
@@ -427,15 +430,32 @@ pub mod thread {
             self.var.wait_while(guard, condition)
         }
 
-        pub fn wait_timeout<'a>(&'a self, dur: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+        pub fn wait_timeout<'a>(&'a self, timeout: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
             self.wait_timeout_on_locked(match self.value.lock() {
                 Ok(guard) => Ok(guard),
                 Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None)))
-            }?, dur)
+            }?, timeout)
         }
 
-        pub fn wait_timeout_on_locked<'a>(&'a self, mutex_guard: MutexGuard<'a, T>, dur: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
-            match self.var.wait_timeout(mutex_guard, dur) {
+        pub fn wait_timeout_on_locked<'a>(&'a self, mutex_guard: MutexGuard<'a, T>, timeout: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            match self.var.wait_timeout(mutex_guard, timeout) {
+                Ok((guard, timeout)) => Ok((guard, Some(timeout))),
+                Err(poison_error) => {
+                    let (guard, timeout) = poison_error.into_inner();
+                    Err(PoisonError::new((guard, Some(timeout))))
+                }
+            }
+        }
+
+        pub fn wait_timeout_while<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, timeout: std::time::Duration, condition: F) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            self.wait_timeout_while_on_locked(match self.value.lock() {
+                Ok(guard) => Ok(guard),
+                Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None)))
+            }?, timeout, condition)
+        }
+
+        pub fn wait_timeout_while_on_locked<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, guard: MutexGuard<'a, T>, timeout: std::time::Duration, condition: F) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            match self.var.wait_timeout_while(guard, timeout, condition) {
                 Ok((guard, timeout)) => Ok((guard, Some(timeout))),
                 Err(poison_error) => {
                     let (guard, timeout) = poison_error.into_inner();

@@ -55,11 +55,11 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
     fn accept_connection(&self, sa: (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn manager_connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.connect(addr)?)
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.connect(addr)?)
     }
 
     fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_handle(self.accept_connection((stream, addr))?)
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.accept_connection((stream, addr))?)
     }
 }
 

@@ -1,13 +1,15 @@
 use core::message::{RawMessage, Buffer};
 use core::serializer::{Serializer, FlatSerializer, BufferSlice};
-use core::util::thread::{Semaphore};
+use core::util::thread::{ChgNtfMutex};
+use std::sync::{Arc};
+
 use super::{State};
 
 use std::io::{Write};
 
 pub struct RawMessageWriter {
     buffer: Buffer,
-    semaphore: Option<Semaphore>,
+    semaphore: Option<Arc<ChgNtfMutex<bool>>>,
     batch_size: usize,
     offset: usize
 }
@@ -24,7 +26,7 @@ impl RawMessageWriter {
         }
     }
 
-    pub fn new_with_semaphore(message: RawMessage, batch_size: usize, semaphore: Semaphore) -> Self {
+    pub fn new_with_semaphore(message: RawMessage, batch_size: usize, semaphore: Arc<ChgNtfMutex<bool>>) -> Self {
         Self {
             buffer: {let mut serializer = FlatSerializer::new();
                      serializer.serialize(&message);
@@ -62,7 +64,9 @@ impl RawMessageWriter {
         if amount <= self.batch_size {
             self.offset += amount;
             if self.is_empty() {
-                self.semaphore.take();
+                if let Some(finished_semaphore) = self.semaphore.take() {
+                    *finished_semaphore.lock_notify().unwrap() = true;
+                }
             }
         } else {
             panic!("Cannot push back more than batch size")
