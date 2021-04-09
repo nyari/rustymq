@@ -92,13 +92,13 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
     fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         let stream = net::TcpStream::connect(addr)?;
-        stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }
 
     fn accept_connection(&self, (stream, _addr): (net::TcpStream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
-        stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         Ok(stream::ReadWriteStreamConnection::new(stream))
     }
