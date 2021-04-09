@@ -32,7 +32,7 @@
 //!     
 //!     requestor.send(message, OpFlag::NoWait).unwrap();
 //!     
-//!     replier.respond(OpFlag::Wait, |rmessage:RawMessage| {
+//!     replier.respond(OpFlag::Wait, OpFlag::Wait, |rmessage:RawMessage| {
 //!         RawMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
 //!     }).unwrap();
 //!     

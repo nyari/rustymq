@@ -21,7 +21,7 @@ fn simple_req_rep_tcp_test() {
     let message = TypedMessage::new(base);
 
     requestor.send_typed(message, OpFlag::NoWait).unwrap();
-    replier.respond_typed(OpFlag::Wait, |rmessage:TypedMessage<TestingStruct>| {
+    replier.respond_typed(OpFlag::Wait, OpFlag::Wait, |rmessage:TypedMessage<TestingStruct>| {
         TypedMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
     }).unwrap();
     let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Wait).expect("Hello");
@@ -41,7 +41,7 @@ fn stress_simple_req_rep_tcp_test() {
     let stop_semaphore_clone = stop_semaphore.clone();
     let _replier_handle = std::thread::spawn(move || { 
         loop {
-            match replier.respond_typed(OpFlag::NoWait, |rmessage:TypedMessage<TestingStruct>| {
+            match replier.respond_typed(OpFlag::NoWait, OpFlag::NoWait, |rmessage:TypedMessage<TestingStruct>| {
                 let (metadata, mut payload) = rmessage.into_parts();
                 payload.a *= 2;
                 payload.b *= 7;

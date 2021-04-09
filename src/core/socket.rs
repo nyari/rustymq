@@ -231,18 +231,18 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
 {
     /// Execute a query (send and then receive) with a raw message
     /// This does not guaratee that the response is for the same message that was sent
-    fn query(&mut self, message :RawMessage, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        self.send(message, flags.clone()).map_err(|error| {(None, error)})?;
-        self.receive(flags)
+    fn query(&mut self, message :RawMessage, send_flags:OpFlag, recieve_flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+        self.send(message, send_flags).map_err(|error| {(None, error)})?;
+        self.receive(recieve_flags)
     }
 
     /// Execute a query (send and then receive) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
-    fn query_typed<S, R>(&mut self, message:TypedMessage<S>, flags:OpFlag) -> Result<TypedMessage<R>, QueryTypedError<S, R>>
+    fn query_typed<S, R>(&mut self, message:TypedMessage<S>, send_flags:OpFlag, recieve_flags: OpFlag) -> Result<TypedMessage<R>, QueryTypedError<S, R>>
         where S: SerializableMessagePayload,
               R: SerializableMessagePayload
     {
-        match self.send_typed(message, flags.clone()) {
-            Ok(_) => match self.receive_typed(flags) {
+        match self.send_typed(message, send_flags) {
+            Ok(_) => match self.receive_typed(recieve_flags) {
                 Ok(msg) => Ok(msg),
                 Err(err) => Err(QueryTypedError::Receive(err))
             },
@@ -251,23 +251,23 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket
     }
 
     /// Respont to a query (receive and then reply) with a raw message
-    fn respond<T: Fn(RawMessage) -> RawMessage> (&mut self, flags:OpFlag, processor: T) -> Result<(), (Option<PeerId>, SocketError)> {
-        let query = self.receive(flags.clone())?;
+    fn respond<T: Fn(RawMessage) -> RawMessage> (&mut self, receive_flags: OpFlag, send_flags: OpFlag, processor: T) -> Result<(), (Option<PeerId>, SocketError)> {
+        let query = self.receive(receive_flags)?;
         let query_metadata = query.metadata().clone();
         let response = processor(query).continue_exchange_metadata(query_metadata);
-        self.send(response, flags).map_err(|error| {(None, error)})?;
+        self.send(response, send_flags).map_err(|error| {(None, error)})?;
         Ok(())
     }
 
     /// Respond to a query (receive and then reply) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
-    fn respond_typed<R, S, Q: Fn(TypedMessage<R>) -> TypedMessage<S>>(&mut self, flags:OpFlag, processor: Q) -> Result<(), QueryTypedError<S, R>>
+    fn respond_typed<R, S, Q: Fn(TypedMessage<R>) -> TypedMessage<S>>(&mut self, receive_flags: OpFlag, send_flags: OpFlag, processor: Q) -> Result<(), QueryTypedError<S, R>>
         where R: SerializableMessagePayload,
               S: SerializableMessagePayload
     {
-        match self.receive_typed(flags.clone()) {
+        match self.receive_typed(receive_flags) {
             Ok(msg) => {
                 let response = processor(msg);
-                match self.send_typed(response, flags) {
+                match self.send_typed(response, send_flags) {
                     Ok(_) => Ok(()),
                     Err(err) => Err(QueryTypedError::Send(err))
                 }
@@ -341,22 +341,7 @@ impl<T> Socket for ArcSocket<T>
 impl<T> InwardSocket for ArcSocket<T>
     where T: InwardSocket {
     fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        match flags {
-            OpFlag::Wait => {
-                super::util::thread::poll(std::time::Duration::from_millis(1), || {
-                    match self.lock_ref().receive(OpFlag::NoWait) {
-                        Ok(message) => Some(Ok(message)),
-                        Err(err) => match err {
-                            (_, SocketError::Timeout) => None,
-                            err => Some(Err(err))
-                        }
-                    }
-                })
-            },
-            OpFlag::NoWait => {
-                self.lock_ref().receive(OpFlag::NoWait)
-            }
-        }
+        self.lock_ref().receive(flags)
     }
 }
 

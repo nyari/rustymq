@@ -3,7 +3,7 @@
 
 /// Importing to handle TypedMessages from RustyMQ
 use rustymq::core::{Message, TypedMessage};
-use rustymq::core::socket::{BidirectionalSocket, OpFlag, ArcSocket, SocketError, QueryTypedError, ReceiveTypedError};
+use rustymq::core::socket::{BidirectionalSocket, OpFlag, ArcSocket};
 use std::thread;
 
 use super::data;
@@ -34,7 +34,7 @@ impl<Socket> OperationServer<Socket>
                 // Create threads that handle new messages
                 result.push(thread::spawn(move || {
                     loop {
-                        arc_socket.respond_typed(OpFlag::NoWait, |message: TypedMessage<data::TimedOperation<data::OperationTask>> | {
+                        arc_socket.respond_typed(OpFlag::Wait, OpFlag::NoWait, |message: TypedMessage<data::TimedOperation<data::OperationTask>> | {
                             let (metadata, input) = message.into_parts();
 
                             let response = match input.0 {
@@ -45,14 +45,7 @@ impl<Socket> OperationServer<Socket>
                             println!("Received: Peer: {}\tConversation: {}", metadata.peer_id().unwrap().get(), metadata.conversation_id().get());
 
                             TypedMessage::new(data::TimedOperation(response, input.1)).continue_exchange_metadata(metadata)
-                        }).or_else(|err| { 
-                                if let QueryTypedError::Receive(ReceiveTypedError::Socket((_, SocketError::Timeout))) = err {
-                                    std::thread::sleep(std::time::Duration::from_millis(1)); Ok(())
-                                } else {
-                                    Err(err)
-                                }
-                            })
-                        .unwrap();
+                        }).unwrap();
                     }
                 }))
             }
