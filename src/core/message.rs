@@ -746,6 +746,7 @@ impl<T> DerefMut for TypedMessage<T>
 }
 
 impl Serializable for Part {
+    #[inline]
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         match self {
             Part::Single => {serializer.serialize(&0u8)}
@@ -754,6 +755,7 @@ impl Serializable for Part {
         }
     }
 
+    #[inline]
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         match deserializer.deserialize::<u8>()? {
             0 => Ok(Part::Single),
@@ -765,31 +767,34 @@ impl Serializable for Part {
 }
 
 impl Serializable for MessageMetadata {
+    #[inline]
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.messageid);
         serializer.serialize(&self.conversationid);
         serializer.serialize(&self.modelid);
-        serializer.serialize(&self.peerid);
         serializer.serialize(&self.part);
     }
     
+    #[inline]
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self {
             messageid: deserializer.deserialize()?,
             conversationid: deserializer.deserialize()?,
             modelid: deserializer.deserialize()?,
-            peerid: deserializer.deserialize()?,
+            peerid: None,
             part: deserializer.deserialize()?
         })
     }
 }
 
 impl Serializable for RawMessage {
+    #[inline]
     fn serialize<T:Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.meta);
         serializer.serialize_raw_slice(self.payload.as_slice());
     }
     
+    #[inline]
     fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self {
             meta: deserializer.deserialize()?,

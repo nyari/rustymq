@@ -345,6 +345,7 @@ impl<T> Socket for ArcSocket<T>
 
 impl<T> InwardSocket for ArcSocket<T>
     where T: InwardSocket {
+        
     fn receive(&mut self, flags:OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.lock_ref().receive(flags)
     }

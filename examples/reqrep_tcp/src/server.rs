@@ -36,13 +36,16 @@ impl<Socket> OperationServer<Socket>
                     loop {
                         arc_socket.respond_typed(OpFlag::NoWait, OpFlag::NoWait, |message: TypedMessage<data::TimedOperation<data::OperationTask>> | {
                             let (metadata, input) = message.into_parts();
+                            let (peer_id, conversation_id) = (metadata.peer_id().unwrap().clone(), metadata.conversation_id().clone());
+
+                            println!("Received: Peer: {}\tConversation: {}", peer_id.get(), conversation_id.get());
 
                             let response = match input.0 {
                                 data::OperationTask::Addition(v1, v2) => data::OperationResult::Success(v1 + v2),
                                 data::OperationTask::Multiplication(v1, v2) => data::OperationResult::Success(v1 * v2)
                             };
 
-                            println!("Received: Peer: {}\tConversation: {}", metadata.peer_id().unwrap().get(), metadata.conversation_id().get());
+                            println!("Responding: Peer: {}\tConversation: {}", peer_id.get(), conversation_id.get());
 
                             TypedMessage::new(data::TimedOperation(response, input.1)).continue_exchange_metadata(metadata)
                         }).or_else(|err| { 
