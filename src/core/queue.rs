@@ -5,23 +5,21 @@ use std::time::Duration;
 use core::message::{Message, PeerId, RawMessage};
 use core::util::thread::ChgNtfMutex;
 
-#[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum QueueOverflowHandling {
     Throttle,
     Drop,
     Error,
     Panic,
 }
-#[allow(dead_code)]
-pub struct QueueingPolicy {
-    queue_depth: Option<(QueueOverflowHandling, usize)>,
-}
+
+pub type QueueingPolicy = (QueueOverflowHandling, usize);
 
 #[derive(Clone)]
 pub struct OutwardMessageQueue {
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
     prio_outward_queue: Arc<Mutex<VecDeque<(Arc<ChgNtfMutex<bool>>, RawMessage)>>>,
+    policy: Option<QueueingPolicy>,
 }
 
 impl OutwardMessageQueue {
@@ -29,6 +27,7 @@ impl OutwardMessageQueue {
         Self {
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
+            policy: None
         }
     }
 
@@ -58,12 +57,14 @@ impl OutwardMessageQueue {
 #[derive(Clone)]
 pub struct InwardMessageQueue {
     inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>,
+    policy: Option<QueueingPolicy>,
 }
 
 impl InwardMessageQueue {
     pub fn new() -> Self {
         Self {
             inward_queue: ChgNtfMutex::new(VecDeque::new()),
+            policy: None
         }
     }
 

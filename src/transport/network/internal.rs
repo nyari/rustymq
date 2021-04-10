@@ -4,6 +4,7 @@
 use core::message::{Message, PeerId, RawMessage};
 use core::queue::{InwardMessageQueue, InwardMessageQueuePeerSide};
 use core::socket::{OpFlag, PeerIdentification, SocketError, SocketInternalError};
+use core::config::{TransportConfiguration};
 use core::stream;
 use core::transport::{
     AcceptorTransport, InitiatorTransport, NetworkAddress, Transport, TransportMethod,
@@ -360,6 +361,10 @@ impl Transport for NetworkConnectionManager {
         SocketInternalError::externalize_result(self.close_connection_internal(peer_identification))
     }
 
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        None
+    }
+
     fn close(self) -> Result<(), SocketError> {
         Ok(())
     }
@@ -397,6 +402,10 @@ impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTran
 
     fn query_connected_peers(&self) -> HashSet<PeerId> {
         self.manager.query_connected_peers()
+    }
+
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        None
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -535,6 +544,10 @@ where
 
     fn query_connected_peers(&self) -> HashSet<PeerId> {
         self.manager.query_connected_peers()
+    }
+
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        None
     }
 
     fn close(self) -> Result<(), SocketError> {

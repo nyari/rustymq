@@ -32,6 +32,8 @@ pub enum SocketError {
     UnrelatedConversation,
     /// The specified conversation part in the [`MessageMetadata`] is not known by the socket
     UnrelatedConversationPart,
+    /// The internal gueue in [`Socket`] or [`Transport`] has reached its limit
+    QueueDepthReached,
     /// The target peer identifier is not specified in the [`MessageMetadata`] and cannot be inferred
     UnknownPeer,
     /// The specific [`TransportMethod`] is already used by the socket
@@ -71,6 +73,7 @@ pub enum SocketInternalError {
     UnrelatedPeer,
     UnrelatedConversation,
     UnrelatedConversationPart,
+    QueueDepthReached,
     UnknownPeer,
     TransportMethodAlreadyInUse,
     TransportTargetUnreachable,
@@ -113,6 +116,7 @@ impl From<SocketInternalError> for SocketError {
             SocketInternalError::UnrelatedConversationPart => {
                 SocketError::UnrelatedConversationPart
             }
+            SocketInternalError::QueueDepthReached => SocketError::QueueDepthReached,
             SocketInternalError::UnknownPeer => SocketError::UnknownPeer,
             SocketInternalError::TransportMethodAlreadyInUse => {
                 SocketError::TransportMethodAlreadyInUse

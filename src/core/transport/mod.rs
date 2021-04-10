@@ -6,6 +6,7 @@ pub use self::network::NetworkAddress;
 
 use core::message::{PeerId, RawMessage};
 use core::socket::{OpFlag, PeerIdentification, SocketError};
+use core::config::{TransportConfiguration};
 use std::any;
 use std::collections::HashSet;
 
@@ -34,6 +35,8 @@ pub trait Transport: Send + Sync {
     ) -> Result<Option<PeerId>, SocketError>;
     /// Query the [`PeerId`]s of all the connected peers
     fn query_connected_peers(&self) -> HashSet<PeerId>;
+    /// Query the stored configuration if present
+    fn query_configuration(&self) -> Option<&TransportConfiguration>;
     /// Close the connection to all connected peers
     fn close(self) -> Result<(), SocketError>;
 }
