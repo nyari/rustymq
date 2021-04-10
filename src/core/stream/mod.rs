@@ -1,3 +1,7 @@
+//! # Stream module
+//! Helper functionality for implementing [`crate::core::transport::Transport`]s for [`std::io::Read`]
+//! and [`std::io::Write`] capable streams
+
 mod writer;
 mod reader;
 mod util;

@@ -51,7 +51,7 @@ pub enum SocketError {
     /// The [`OpFlag`] specified for the [`InwardSocket`] or [`OutwardSocket`] operation is not supprted by 
     /// the socket or the underlieing Transport
     UnsupportedOpFlag(OpFlag),
-    /// DNS domain name required but not available in [`core::network:;NetworkAddress`] 
+    /// DNS domain name required but not available in NetworkAddress 
     MissingDNSDomain,
     /// The [`TransportMethod`] is not supported by the Transport
     InvalidTransportMethod,
