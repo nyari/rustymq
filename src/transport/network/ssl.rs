@@ -8,7 +8,7 @@ use std::net::{SocketAddr};
 
 use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
-use core::queue::{InwardMessageQueuePeerSide};
+use core::queue::{OutwardMessageQueue, InwardMessageQueuePeerSide};
 use core::stream;
 
 use std::sync::Arc;
@@ -135,7 +135,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 let stream_mut_ref = ssl_stream.get_mut();
                 stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-                Ok(stream::ReadWriteStreamConnection::new(ssl_stream, inward_queue))
+                Ok(stream::ReadWriteStreamConnection::new(ssl_stream, OutwardMessageQueue::new(), inward_queue))
             }
             Err(_) => {
                 Err(SocketInternalError::HandshakeFailed)
@@ -147,7 +147,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         let stream_mut_ref = stream.get_mut();
         stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream, inward_queue))
+        Ok(stream::ReadWriteStreamConnection::new(stream, OutwardMessageQueue::new(), inward_queue))
     }
 }
 

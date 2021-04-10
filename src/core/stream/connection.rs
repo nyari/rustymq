@@ -46,12 +46,12 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     /// Creates an instance for a stream object and an inward queue
-    pub fn new(stream: S, inward_queue: InwardMessageQueuePeerSide) -> Self {
+    pub fn new(stream: S, outward_queue: OutwardMessageQueue, inward_queue: InwardMessageQueuePeerSide) -> Self {
         Self {
             stream: stream,
             reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
             writer: stream::RawMessageWriter::new_empty(),
-            outward_queue: OutwardMessageQueue::new(),
+            outward_queue: outward_queue,
             inward_queue: inward_queue
         }
     }
@@ -120,12 +120,10 @@ pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write + Send> {
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
-    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<(Self, OutwardMessageQueue), SocketInternalError> {
-        let worker = Self {
+    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
+        Ok(Self {
             stream: stream
-        };
-        let handle = worker.stream.get_outward_queue();
-        Ok((worker, handle))
+        })
     }
 
     pub fn main_loop(mut self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
@@ -148,16 +146,17 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
     }
 }
 
-pub struct ReadWriteStreamConnectionManager {
+pub struct ReadWriteStreamConnectionThreadManager {
     outward_queue: OutwardMessageQueue,
     worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
     last_error: Option<Result<(), SocketInternalError>>,
     stop_semaphore: Semaphore
 }
 
-impl ReadWriteStreamConnectionManager {
-    pub fn construct_from_worker_queue<S: io::Read + io::Write + Send + 'static>(stream:ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
-        let (worker, outward_queue) = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
+impl ReadWriteStreamConnectionThreadManager {
+    pub fn execute_thread_for<S: io::Read + io::Write + Send + 'static>(stream: ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
+        let outward_queue = stream.get_outward_queue();
+        let worker = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
@@ -206,7 +205,7 @@ impl ReadWriteStreamConnectionManager {
     }
 }
 
-impl Drop for ReadWriteStreamConnectionManager {
+impl Drop for ReadWriteStreamConnectionThreadManager {
     #[allow(unused_must_use)]
     fn drop(&mut self) {
         if self.last_error.is_none() {

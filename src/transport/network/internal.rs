@@ -54,17 +54,17 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
 
     fn accept_connection(&self, stream: Self::Stream, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
-    fn manager_connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.connect(addr, inward_queue)?)
+    fn manager_connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
+        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.connect(addr, inward_queue)?)
     }
 
-    fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.accept_connection(stream, addr,  inward_queue)?)
+    fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
+        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.accept_connection(stream, addr, inward_queue)?)
     }
 }
 
 pub struct NetworkConnectionPeerManager {
-    peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionManager>,
+    peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionThreadManager>,
     addresses: HashMap<SocketAddr, PeerId>,
     peers: HashMap<PeerId, SocketAddr>,
     inward_queue: InwardMessageQueue
@@ -147,7 +147,7 @@ impl NetworkConnectionPeerManager {
         }
     }
 
-    fn get_message_peer_connection<'a>(&'a mut self, peer_id: &Option<PeerId>) -> Result<&'a mut stream::ReadWriteStreamConnectionManager, SocketInternalError> {
+    fn get_message_peer_connection<'a>(&'a mut self, peer_id: &Option<PeerId>) -> Result<&'a mut stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         match peer_id {
             Some(peerid) => match self.peer_table.get_mut(&peerid) {
                 Some(connection) => Ok(connection),
@@ -172,7 +172,7 @@ impl NetworkConnectionPeerManager {
         Ok(peer_id)
     }
 
-    fn commit_onnection(&mut self, connection: stream::ReadWriteStreamConnectionManager, addr: SocketAddr, peer_id: PeerId) {
+    fn commit_onnection(&mut self, connection: stream::ReadWriteStreamConnectionThreadManager, addr: SocketAddr, peer_id: PeerId) {
         self.peer_table.insert(peer_id, connection);
         self.addresses.insert(addr, peer_id);
         self.peers.insert(peer_id, addr);
