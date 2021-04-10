@@ -1,14 +1,11 @@
-use core::serializer::{FlatDeserializer, FlatSerializer, Serializer, Deserializer};
-use core::serializer;
 use core::message::{Buffer, BufferSlice, SerializableMessagePayload};
+use core::serializer;
+use core::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializer};
 
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
-#[derive(Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct TestingStruct {
     pub a: u64,
-    pub b: u64
+    pub b: u64,
 }
 
 impl SerializableMessagePayload for TestingStruct {
@@ -27,7 +24,7 @@ impl SerializableMessagePayload for TestingStruct {
 
         Ok(Self {
             a: deserializer.deserialize_raw::<u64>()?,
-            b: deserializer.deserialize_raw::<u64>()?
+            b: deserializer.deserialize_raw::<u64>()?,
         })
     }
 }

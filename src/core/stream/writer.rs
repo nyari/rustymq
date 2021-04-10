@@ -1,39 +1,47 @@
-use core::message::{RawMessage, Buffer};
-use core::serializer::{Serializer, FlatSerializer, BufferSlice};
-use core::util::thread::{ChgNtfMutex};
-use std::sync::{Arc};
+use core::message::{Buffer, RawMessage};
+use core::serializer::{BufferSlice, FlatSerializer, Serializer};
+use core::util::thread::ChgNtfMutex;
+use std::sync::Arc;
 
-use super::{State};
+use super::State;
 
-use std::io::{Write};
+use std::io::Write;
 
 pub struct RawMessageWriter {
     buffer: Buffer,
     semaphore: Option<Arc<ChgNtfMutex<bool>>>,
     batch_size: usize,
-    offset: usize
+    offset: usize,
 }
 
 impl RawMessageWriter {
     pub fn new(message: RawMessage, batch_size: usize) -> Self {
         Self {
-            buffer: {let mut serializer = FlatSerializer::new();
-                     serializer.serialize(&message);
-                     serializer.finalize()},
+            buffer: {
+                let mut serializer = FlatSerializer::new();
+                serializer.serialize(&message);
+                serializer.finalize()
+            },
             semaphore: None,
             batch_size: batch_size,
-            offset: 0
+            offset: 0,
         }
     }
 
-    pub fn new_with_semaphore(message: RawMessage, batch_size: usize, semaphore: Arc<ChgNtfMutex<bool>>) -> Self {
+    pub fn new_with_semaphore(
+        message: RawMessage,
+        batch_size: usize,
+        semaphore: Arc<ChgNtfMutex<bool>>,
+    ) -> Self {
         Self {
-            buffer: {let mut serializer = FlatSerializer::new();
-                     serializer.serialize(&message);
-                     serializer.finalize()},
+            buffer: {
+                let mut serializer = FlatSerializer::new();
+                serializer.serialize(&message);
+                serializer.finalize()
+            },
             semaphore: Some(semaphore),
             batch_size: batch_size,
-            offset: 0
+            offset: 0,
         }
     }
 
@@ -42,13 +50,13 @@ impl RawMessageWriter {
             buffer: Buffer::new(),
             semaphore: None,
             batch_size: 0,
-            offset: 0
+            offset: 0,
         }
     }
 
     fn get_batch<'a>(&'a self) -> Option<BufferSlice<'a>> {
         if self.offset + self.batch_size < self.buffer.len() {
-            Some(&self.buffer[self.offset..self.offset+self.batch_size])
+            Some(&self.buffer[self.offset..self.offset + self.batch_size])
         } else if self.offset < self.buffer.len() {
             Some(&self.buffer[self.offset..])
         } else {
@@ -73,10 +81,10 @@ impl RawMessageWriter {
         }
     }
 
-    pub fn write_into<F: Write>(&mut self, writer:&mut F)-> Result<(), State> {
+    pub fn write_into<F: Write>(&mut self, writer: &mut F) -> Result<(), State> {
         let result = match self.get_batch() {
             Some(buffer_slice) => Ok(writer.write(buffer_slice)?),
-            None => Err(State::Empty)
+            None => Err(State::Empty),
         };
 
         match result {
@@ -87,10 +95,8 @@ impl RawMessageWriter {
                 } else {
                     Ok(())
                 }
-            },
-            Err(err) => {
-                Err(err)
             }
+            Err(err) => Err(err),
         }
     }
 }

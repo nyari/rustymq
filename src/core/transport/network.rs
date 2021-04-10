@@ -1,17 +1,16 @@
 //! # Network transport core
 //! Module containing the datastructures for specifiyng peers through network
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::io;
-use std::string::{String};
 use core::util::SingleIter;
+use std::io;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::string::String;
 
 /// #NetworkAddress
 /// Contains the IP address and/or domain name of the peer to connect to
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NetworkAddress {
     address: SocketAddr,
-    dns: Option<String>
+    dns: Option<String>,
 }
 
 impl NetworkAddress {
@@ -19,7 +18,7 @@ impl NetworkAddress {
     pub fn from_socket_addr(addr: SocketAddr) -> Self {
         Self {
             address: addr,
-            dns: None
+            dns: None,
         }
     }
 
@@ -28,10 +27,13 @@ impl NetworkAddress {
         for address in dns.to_socket_addrs()? {
             return Ok(Self {
                 address: address,
-                dns: Some(dns)
-            })
+                dns: Some(dns),
+            });
         }
-        Err(io::Error::new(io::ErrorKind::AddrNotAvailable, "Did not find address for DNS"))
+        Err(io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "Did not find address for DNS",
+        ))
     }
 
     /// Query the contained socket address
@@ -46,9 +48,9 @@ impl NetworkAddress {
 
     /// Query the DNS name if contained
     pub fn get_dns_name(&self) -> Option<String> {
-        self.dns.as_ref().map(|dns| {
-            dns.split(":").next().unwrap().to_string()
-        })
+        self.dns
+            .as_ref()
+            .map(|dns| dns.split(":").next().unwrap().to_string())
     }
 }
 

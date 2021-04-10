@@ -2,12 +2,12 @@
 //! Helper functionality for implementing [`crate::core::transport::Transport`]s for [`std::io::Read`]
 //! and [`std::io::Write`] capable streams
 
-mod writer;
+mod connection;
 mod reader;
 mod util;
-mod connection;
+mod writer;
 
-pub use self::reader::*;
-pub use self::writer::*;
-pub use self::util::*;
 pub use self::connection::*;
+pub use self::reader::*;
+pub use self::util::*;
+pub use self::writer::*;

@@ -5,32 +5,28 @@
 //! This module containts the definition of Messages, which are a core concept of RustyMQ.
 //! All the datastructures, traits and enums needed to compose messages for sending and then
 //! receiving are defined here
-use std;
-use std::convert::{TryFrom};
-use std::ops::{Deref, DerefMut};
-use core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer};
 use core::serializer;
+use core::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializable, Serializer};
+use std;
+use std::convert::TryFrom;
+use std::ops::{Deref, DerefMut};
 
-use core::util::Identifier;
 pub use core::serializer::{Buffer, BufferSlice};
+use core::util::Identifier;
 
 /// # Multipart message part identifier
 /// Enum for tracking multipart messages
 /// ## Description
 /// Enum to track multiplart message sequences more easily. Although the iteration of these should
 /// be handled manually by the user
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(PartialEq)]
-#[derive(Eq)]
-#[derive(Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Part {
     /// Signaling this is a single message
     Single,
     /// Signaling this is an intermediate message of a multipart message seqence and the index
     Intermediate(u32),
     /// Signaling this is a final message of a multipart message sequence and the index
-    Final(u32)
+    Final(u32),
 }
 
 impl Part {
@@ -69,7 +65,7 @@ impl Part {
     pub fn is_continueable(&self) -> bool {
         match self {
             Part::Intermediate(_) => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -77,7 +73,7 @@ impl Part {
     pub fn is_initial(&self) -> bool {
         match self {
             Part::Single | Part::Intermediate(0) => true,
-            _ => false 
+            _ => false,
         }
     }
 
@@ -85,7 +81,7 @@ impl Part {
     pub fn is_last(&self) -> bool {
         match self {
             Part::Single | Part::Final(_) => true,
-            _ => false 
+            _ => false,
         }
     }
 
@@ -96,7 +92,7 @@ impl Part {
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.next_multipart().unwrap();
     /// assert!(std::matches!(result, Part::Intermediate(1)));
     /// # }
@@ -105,7 +101,7 @@ impl Part {
         match self {
             Part::Intermediate(part) => Ok(Part::Intermediate(part + 1)),
             Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
-            Part::Single => Err(PartError::NotMultipart)
+            Part::Single => Err(PartError::NotMultipart),
         }
     }
 
@@ -116,7 +112,7 @@ impl Part {
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.as_final_multipart().unwrap();
     /// assert!(std::matches!(result, Part::Final(0)));
     /// # }
@@ -125,7 +121,7 @@ impl Part {
         match self {
             Part::Intermediate(part) => Ok(Part::Final(part)),
             Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
-            Part::Single => Err(PartError::NotMultipart)
+            Part::Single => Err(PartError::NotMultipart),
         }
     }
 
@@ -136,7 +132,7 @@ impl Part {
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.next_final_multipart().unwrap();
     /// assert!(std::matches!(result, Part::Final(1)));
     /// # }
@@ -145,7 +141,7 @@ impl Part {
         match self {
             Part::Intermediate(part) => Ok(Part::Final(part + 1)),
             Part::Final(_) => Err(PartError::AlreadyFinishedMultipart),
-            Part::Single => Err(PartError::NotMultipart)
+            Part::Single => Err(PartError::NotMultipart),
         }
     }
 
@@ -156,10 +152,10 @@ impl Part {
     /// # use rustymq::core::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::start_multipart();
-    /// 
+    ///
     /// assert!(std::matches!(original, Part::Intermediate(0)));
     /// original.update_to_next_part(&Part::Intermediate(1)).unwrap();
-    /// 
+    ///
     /// assert!(std::matches!(original, Part::Intermediate(1)));
     /// # }
     /// ```
@@ -167,7 +163,7 @@ impl Part {
     /// # use rustymq::core::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::start_multipart();
-    /// 
+    ///
     /// assert!(std::matches!(original, Part::Intermediate(0)));
     /// assert!(std::matches!(original.update_to_next_part(&Part::Intermediate(2)),
     ///                       Err(PartError::NotConsecutivePart)));
@@ -177,34 +173,57 @@ impl Part {
     /// # use rustymq::core::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::Final(2);
-    /// 
+    ///
     /// assert!(std::matches!(original.update_to_next_part(&Part::Intermediate(0)),
     ///                       Err(PartError::AlreadyFinishedMultipart)));
     /// # }
     /// ```
     pub fn update_to_next_part(&mut self, other: &Self) -> Result<(), PartError> {
         match (&self, other) {
-            (Part::Intermediate(part), Part::Intermediate(other_part)) if *part + 1 == *other_part => Ok(*self = other.clone()),
-            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 == *other_part => Ok(*self = other.clone()),
-            (Part::Intermediate(part), Part::Intermediate(other_part)) if *part + 1 != *other_part => Err(PartError::NotConsecutivePart),
-            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Intermediate(part), Part::Intermediate(other_part))
+                if *part + 1 == *other_part =>
+            {
+                Ok(*self = other.clone())
+            }
+            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 == *other_part => {
+                Ok(*self = other.clone())
+            }
+            (Part::Intermediate(part), Part::Intermediate(other_part))
+                if *part + 1 != *other_part =>
+            {
+                Err(PartError::NotConsecutivePart)
+            }
+            (Part::Intermediate(part), Part::Final(other_part)) if *part + 1 != *other_part => {
+                Err(PartError::NotConsecutivePart)
+            }
             (Part::Final(_), _) => Err(PartError::AlreadyFinishedMultipart),
-            _ => Err(PartError::NotMultipart)
+            _ => Err(PartError::NotMultipart),
         }
     }
 
     /// Generate new instance with next index if possible from other. Same as update_to_next_part function without mutability
     pub fn to_next_part(self, other: &Self) -> Result<Self, PartError> {
         match (self, other) {
-            (Part::Intermediate(part), Part::Intermediate(other_part)) if part + 1 == *other_part => Ok(other.clone()),
-            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 == *other_part => Ok(other.clone()),
-            (Part::Intermediate(part), Part::Intermediate(other_part)) if part + 1 != *other_part => Err(PartError::NotConsecutivePart),
-            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 != *other_part => Err(PartError::NotConsecutivePart),
+            (Part::Intermediate(part), Part::Intermediate(other_part))
+                if part + 1 == *other_part =>
+            {
+                Ok(other.clone())
+            }
+            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 == *other_part => {
+                Ok(other.clone())
+            }
+            (Part::Intermediate(part), Part::Intermediate(other_part))
+                if part + 1 != *other_part =>
+            {
+                Err(PartError::NotConsecutivePart)
+            }
+            (Part::Intermediate(part), Part::Final(other_part)) if part + 1 != *other_part => {
+                Err(PartError::NotConsecutivePart)
+            }
             (Part::Final(_), _) => Err(PartError::AlreadyFinishedMultipart),
-            _ => Err(PartError::NotMultipart)
+            _ => Err(PartError::NotMultipart),
         }
     }
-
 }
 
 /// # Multipart message part tracking error
@@ -216,7 +235,7 @@ pub enum PartError {
     /// Continuation of an already closed or finalized multipart message
     AlreadyFinishedMultipart,
     /// Part not consecutive
-    NotConsecutivePart
+    NotConsecutivePart,
 }
 
 /// Type definition for message identifier data structure
@@ -238,11 +257,7 @@ pub type CommunicationModelId = u16;
 /// * Peer ID for identifying the peer the message is addressed to or received from. Optionality is dependent on the communication model used.
 ///   For details see [super::super::model]:here
 /// * Optional multipart message indexing
-#[derive(Clone)]
-#[derive(PartialEq)]
-#[derive(Eq)]
-#[derive(Hash)]
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct MessageMetadata {
     /// Message identifier for tracking a message. By default it is randomly generated
     messageid: MessageId,
@@ -253,7 +268,7 @@ pub struct MessageMetadata {
     /// Peer id for idetification of the peer the message is addressed to or received from
     peerid: Option<PeerId>,
     /// Part tracker for multipart message tracking
-    part: Part
+    part: Part,
 }
 
 impl MessageMetadata {
@@ -279,7 +294,7 @@ impl MessageMetadata {
             conversationid: ConversationId::new_random(),
             modelid: None,
             peerid: None,
-            part: Part::Single
+            part: Part::Single,
         }
     }
 
@@ -308,7 +323,7 @@ impl MessageMetadata {
     }
 
     /// Generate new instance from current one with a peer identifier applied
-    /// 
+    ///
     /// This method will commit the peer identifier given to the metadata but retain all the other fields
     /// ## Example
     /// ```rust
@@ -316,21 +331,21 @@ impl MessageMetadata {
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     /// assert!(std::matches!(metadata.peer_id(), None));
-    /// 
+    ///
     /// let peer_id = PeerId::new(5);
     /// let metadata = metadata.applied_peer_id(peer_id.clone());
     /// assert!(std::matches!(metadata.peer_id(), Some(peer_id)));
     /// # }
     /// ```
-    pub fn applied_peer_id(self, id:PeerId) -> Self {
+    pub fn applied_peer_id(self, id: PeerId) -> Self {
         Self {
-            peerid:Some(id),
+            peerid: Some(id),
             ..self
         }
     }
 
     /// Generate new instance from current one with multipart message part tracker
-    /// 
+    ///
     /// This method will set the part tracking of the metadata to Some(Part::Intermediate(0)) while
     /// retaining all other fields
     /// ## Example
@@ -339,7 +354,7 @@ impl MessageMetadata {
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     /// assert!(std::matches!(metadata.part(), Part::Single));
-    /// 
+    ///
     /// let metadata = metadata.started_multipart();
     /// assert!(std::matches!(metadata.part(), Part::Intermediate(0)));
     /// # }
@@ -352,7 +367,7 @@ impl MessageMetadata {
     }
 
     /// Generate new instance for continuing an already existing conversation
-    /// 
+    ///
     /// This method will retain all fields of the metadata except for the message identifier and part
     /// ## Example
     /// ```rust
@@ -361,7 +376,7 @@ impl MessageMetadata {
     /// let original = MessageMetadata::new();
     /// let original_converstion_id = original.conversation_id().clone();
     /// let original_clone = original.clone();
-    /// 
+    ///
     /// let continuation = original.continue_exchange();
     /// assert_ne!(original_clone.message_id(), continuation.message_id());
     /// assert_eq!(original_clone.conversation_id(), continuation.conversation_id());
@@ -377,7 +392,7 @@ impl MessageMetadata {
     }
 
     /// Generate new instace with a new communication model id. (Only needed for custom communication model implementation)
-    /// 
+    ///
     /// This is only needed in case you are implementing your own communication model. It will retain all fields of the metadata
     /// except for the communication model identifier given as the parameter
     pub fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
@@ -386,7 +401,7 @@ impl MessageMetadata {
             ..self
         }
     }
-    
+
     /// Qurey the stored message id
     pub fn message_id(&self) -> &MessageId {
         &self.messageid
@@ -424,7 +439,7 @@ impl MessageMetadata {
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.next_multipart().unwrap();
     /// assert!(std::matches!(result.part(), Part::Intermediate(1)));
     /// # }
@@ -443,7 +458,7 @@ impl MessageMetadata {
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.as_final_multipart().unwrap();
     /// assert!(std::matches!(result.part(), Part::Final(0)));
     /// # }
@@ -462,7 +477,7 @@ impl MessageMetadata {
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
-    /// 
+    ///
     /// let result = original.as_final_multipart().unwrap();
     /// assert!(std::matches!(result.part(), Part::Final(0)));
     /// # }
@@ -476,8 +491,7 @@ impl MessageMetadata {
 }
 
 /// RustyMQ Message Trait for a universal interface for messages with a given associated payload type
-pub trait Message: Sized
-{
+pub trait Message: Sized {
     /// Associated type of the payload type
     type Payload;
 
@@ -503,7 +517,10 @@ pub trait Message: Sized
     fn into_parts(self) -> (MessageMetadata, Self::Payload);
 
     /// Generate new instance with mutated metadata but keeping the payload.
-    fn mutated_metadata<Mutator: Fn(MessageMetadata) -> MessageMetadata>(self, mutator: Mutator) -> Self {
+    fn mutated_metadata<Mutator: Fn(MessageMetadata) -> MessageMetadata>(
+        self,
+        mutator: Mutator,
+    ) -> Self {
         let (meta, payload) = self.into_parts();
         Self::with_metadata(mutator(meta), payload)
     }
@@ -545,29 +562,32 @@ pub trait Message: Sized
 
     /// Generate new instance with new communication model identifier in metadata but keeping everything else
     fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
-        self.mutated_metadata(|metadata| {metadata.commit_communication_model_id(model_id)})
+        self.mutated_metadata(|metadata| metadata.commit_communication_model_id(model_id))
     }
 
     /// Generate new instance by continuing metadata exchange and with the given payload
-    fn continue_exchange(self, payload: Self::Payload) -> Self where Self: Sized {
+    fn continue_exchange(self, payload: Self::Payload) -> Self
+    where
+        Self: Sized,
+    {
         let metadata = self.into_metadata();
         Self::with_metadata(metadata.continue_exchange(), payload)
     }
 
     /// Generate new instance by keeping payload and continuing metadata exchange
-    fn continue_exchange_metadata(self, meta: MessageMetadata) -> Self where Self: Sized {
-        Self::with_metadata(meta.continue_exchange(),
-                            self.into_payload())
+    fn continue_exchange_metadata(self, meta: MessageMetadata) -> Self
+    where
+        Self: Sized,
+    {
+        Self::with_metadata(meta.continue_exchange(), self.into_payload())
     }
 }
 
 /// RawMessage is a message type implementing the Message trait, with a binary buffer set as payload
-#[derive(Clone)]
-#[derive(Debug)]
-pub struct RawMessage
-{
+#[derive(Clone, Debug)]
+pub struct RawMessage {
     meta: MessageMetadata,
-    payload: Buffer
+    payload: Buffer,
 }
 
 impl Message for RawMessage {
@@ -576,14 +596,14 @@ impl Message for RawMessage {
     fn new(payload: Self::Payload) -> Self {
         Self {
             meta: MessageMetadata::new(),
-            payload: payload
+            payload: payload,
         }
     }
 
     fn with_metadata(meta: MessageMetadata, payload: Self::Payload) -> Self {
         Self {
             meta: meta,
-            payload: payload
+            payload: payload,
         }
     }
 
@@ -608,8 +628,8 @@ impl Message for RawMessage {
     }
 }
 
-/// Implementing this trait on a struct allows for using a [`TypedMessage`] with the struct 
-pub trait SerializableMessagePayload : Sized {
+/// Implementing this trait on a struct allows for using a [`TypedMessage`] with the struct
+pub trait SerializableMessagePayload: Sized {
     /// Associated type for the possible error during serialization
     type SerializationError: std::fmt::Debug;
     /// Associated type for the possible error during deserialization
@@ -623,7 +643,9 @@ pub trait SerializableMessagePayload : Sized {
 
 /// Blanket implementation for all [`Serializable`] traits to be used as a SerializableMessagePayload using [`FlatSerializer`]
 impl<T> SerializableMessagePayload for T
-    where T: Serializable {
+where
+    T: Serializable,
+{
     type SerializationError = ();
     type DeserializationError = serializer::Error;
 
@@ -642,14 +664,16 @@ impl<T> SerializableMessagePayload for T
 /// Typed message is a generic implementation for a Message trait with custom type
 #[derive(Clone)]
 pub struct TypedMessage<T>
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     meta: MessageMetadata,
-    payload: T
+    payload: T,
 }
 
 impl<T> TypedMessage<T>
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     pub fn mutated_payload(self, mutator: &dyn Fn(T) -> T) -> Self {
         Self {
@@ -660,21 +684,22 @@ impl<T> TypedMessage<T>
 }
 
 impl<T> Message for TypedMessage<T>
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     type Payload = T;
 
     fn new(payload: Self::Payload) -> Self {
         Self {
             meta: MessageMetadata::new(),
-            payload: payload
+            payload: payload,
         }
     }
 
     fn with_metadata(meta: MessageMetadata, payload: Self::Payload) -> Self {
         Self {
             meta: meta,
-            payload: payload
+            payload: payload,
         }
     }
 
@@ -700,7 +725,8 @@ impl<T> Message for TypedMessage<T>
 }
 
 impl<T> TryFrom<TypedMessage<T>> for RawMessage
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     type Error = T::SerializationError;
 
@@ -708,13 +734,14 @@ impl<T> TryFrom<TypedMessage<T>> for RawMessage
         let (meta, payload) = value.into_parts();
         Ok(Self {
             meta: meta,
-            payload: payload.serialize()?
+            payload: payload.serialize()?,
         })
     }
 }
 
 impl<T> TryFrom<RawMessage> for TypedMessage<T>
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     type Error = T::DeserializationError;
 
@@ -722,13 +749,14 @@ impl<T> TryFrom<RawMessage> for TypedMessage<T>
         let (meta, payload) = value.into_parts();
         Ok(Self {
             meta: meta,
-            payload: T::deserialize(&payload)?
+            payload: T::deserialize(&payload)?,
         })
     }
 }
 
 impl<T> Deref for TypedMessage<T>
-    where T: SerializableMessagePayload
+where
+    T: SerializableMessagePayload,
 {
     type Target = T;
 
@@ -737,8 +765,9 @@ impl<T> Deref for TypedMessage<T>
     }
 }
 
-impl<T> DerefMut for TypedMessage<T> 
-    where T: SerializableMessagePayload
+impl<T> DerefMut for TypedMessage<T>
+where
+    T: SerializableMessagePayload,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.payload
@@ -747,58 +776,64 @@ impl<T> DerefMut for TypedMessage<T>
 
 impl Serializable for Part {
     #[inline]
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
+    fn serialize<T: Serializer>(&self, serializer: &mut T) {
         match self {
-            Part::Single => {serializer.serialize(&0u8)}
-            Part::Intermediate(value) => {serializer.serialize(&1u8); serializer.serialize(value)},
-            Part::Final(value) => {serializer.serialize(&2u8); serializer.serialize(value)}
+            Part::Single => serializer.serialize(&0u8),
+            Part::Intermediate(value) => {
+                serializer.serialize(&1u8);
+                serializer.serialize(value)
+            }
+            Part::Final(value) => {
+                serializer.serialize(&2u8);
+                serializer.serialize(value)
+            }
         }
     }
 
     #[inline]
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+    fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         match deserializer.deserialize::<u8>()? {
             0 => Ok(Part::Single),
             1 => Ok(Part::Intermediate(deserializer.deserialize()?)),
             2 => Ok(Part::Final(deserializer.deserialize()?)),
-            _ => Err(serializer::Error::DemarshallingFailed)
+            _ => Err(serializer::Error::DemarshallingFailed),
         }
     }
 }
 
 impl Serializable for MessageMetadata {
     #[inline]
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
+    fn serialize<T: Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.messageid);
         serializer.serialize(&self.conversationid);
         serializer.serialize(&self.modelid);
         serializer.serialize(&self.part);
     }
-    
+
     #[inline]
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+    fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self {
             messageid: deserializer.deserialize()?,
             conversationid: deserializer.deserialize()?,
             modelid: deserializer.deserialize()?,
             peerid: None,
-            part: deserializer.deserialize()?
+            part: deserializer.deserialize()?,
         })
     }
 }
 
 impl Serializable for RawMessage {
     #[inline]
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
+    fn serialize<T: Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.meta);
         serializer.serialize_raw_slice(self.payload.as_slice());
     }
-    
+
     #[inline]
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+    fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self {
             meta: deserializer.deserialize()?,
-            payload: deserializer.deserialize_raw_slice()?
+            payload: deserializer.deserialize_raw_slice()?,
         })
     }
 }

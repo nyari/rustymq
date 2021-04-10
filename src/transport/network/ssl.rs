@@ -3,18 +3,18 @@
 
 use super::internal::*;
 
-use openssl::ssl::{SslConnector, SslStream, SslAcceptor};
-use std::net::{SocketAddr};
+use openssl::ssl::{SslAcceptor, SslConnector, SslStream};
+use std::net::SocketAddr;
 
-use core::socket::{SocketInternalError};
-use core::transport::{NetworkAddress};
-use core::queue::{OutwardMessageQueue, InwardMessageQueuePeerSide};
+use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::socket::SocketInternalError;
 use core::stream;
+use core::transport::NetworkAddress;
 
 use std::sync::Arc;
 
-use std::net;
 use std::io;
+use std::net;
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 1;
 
@@ -22,14 +22,14 @@ impl NetworkStream for SslStream<net::TcpStream> {}
 
 pub struct StreamListener {
     socket: net::TcpListener,
-    acceptor: SslAcceptor
+    acceptor: SslAcceptor,
 }
 
 impl StreamListener {
     pub fn new(socket: net::TcpListener, acceptor: SslAcceptor) -> Self {
         Self {
             socket: socket,
-            acceptor: acceptor
+            acceptor: acceptor,
         }
     }
 }
@@ -52,7 +52,10 @@ impl NetworkListener for StreamListener {
         let (stream, addr) = self.socket.accept()?;
         match acceptor.accept(stream) {
             Ok(ssl_stream) => Ok((ssl_stream, addr)),
-            Err(_) => Err(io::Error::new(io::ErrorKind::ConnectionRefused, "SSL Handshake failed"))
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "SSL Handshake failed",
+            )),
         }
     }
 
@@ -81,16 +84,16 @@ impl NetworkListener for StreamListener {
 /// # SSL Stream listener builder
 /// This structure is needed for constructing [`AcceptorTransport`]s to configure the underlieing SSL Listener
 pub struct StreamListenerBuilder {
-    acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send>
+    acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send>,
 }
 
 impl StreamListenerBuilder {
     /// Construct a new listener builder that allows for listening to SLL connections
     /// The acceptor_builder is a factory function that can construct an `openssl::ssl::SslAcceptor`.
     /// For details please see OpenSSL crate
-    pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send >) -> Self {
+    pub fn new(acceptor_builder: Arc<dyn Fn() -> SslAcceptor + Sync + Send>) -> Self {
         Self {
-            acceptor_builder: acceptor_builder
+            acceptor_builder: acceptor_builder,
         }
     }
 }
@@ -109,7 +112,7 @@ impl NetworkListenerBuilder for StreamListenerBuilder {
 /// # SSL Stream connection builder
 /// This structure is needed for constructing [`AcceptorTransport`]s and [`InitiatorTransport`] to configure the unerlieing SSL stream
 pub struct StreamConnectionBuilder {
-    connector: SslConnector
+    connector: SslConnector,
 }
 
 impl StreamConnectionBuilder {
@@ -118,7 +121,7 @@ impl StreamConnectionBuilder {
     /// For details please see OpenSSL crate
     pub fn new(connector: SslConnector) -> Self {
         Self {
-            connector: connector
+            connector: connector,
         }
     }
 }
@@ -126,32 +129,58 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = SslStream<net::TcpStream>;
 
-    fn connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
-        let dns_address = addr.get_dns_name().ok_or(SocketInternalError::MissingDNSDomain)?;
+    fn connect(
+        &self,
+        addr: NetworkAddress,
+        inward_queue: InwardMessageQueuePeerSide,
+    ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
+        let dns_address = addr
+            .get_dns_name()
+            .ok_or(SocketInternalError::MissingDNSDomain)?;
         let stream = net::TcpStream::connect(addr.get_address())?;
 
         match self.connector.connect(dns_address.as_str(), stream) {
-            Ok(mut ssl_stream) => { 
+            Ok(mut ssl_stream) => {
                 let stream_mut_ref = ssl_stream.get_mut();
-                stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-                stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-                Ok(stream::ReadWriteStreamConnection::new(ssl_stream, OutwardMessageQueue::new(), inward_queue))
+                stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(
+                    SOCKET_READ_TIMEOUT_MS,
+                )))?;
+                stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(
+                    SOCKET_READ_TIMEOUT_MS,
+                )))?;
+                Ok(stream::ReadWriteStreamConnection::new(
+                    ssl_stream,
+                    OutwardMessageQueue::new(),
+                    inward_queue,
+                ))
             }
-            Err(_) => {
-                Err(SocketInternalError::HandshakeFailed)
-            }
+            Err(_) => Err(SocketInternalError::HandshakeFailed),
         }
     }
 
-    fn accept_connection(&self, mut stream: Self::Stream, _addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
+    fn accept_connection(
+        &self,
+        mut stream: Self::Stream,
+        _addr: NetworkAddress,
+        inward_queue: InwardMessageQueuePeerSide,
+    ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let stream_mut_ref = stream.get_mut();
-        stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream, OutwardMessageQueue::new(), inward_queue))
+        stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
+        stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
+        Ok(stream::ReadWriteStreamConnection::new(
+            stream,
+            OutwardMessageQueue::new(),
+            inward_queue,
+        ))
     }
 }
 
 /// TCP Initiator transport to use with SSL  based connections
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
 /// TCP Acceptor transport to use with SSL  based connections
-pub type AcceptorTransport = NetworkAcceptorTransport<StreamListener, StreamListenerBuilder, StreamConnectionBuilder>;
+pub type AcceptorTransport =
+    NetworkAcceptorTransport<StreamListener, StreamListenerBuilder, StreamConnectionBuilder>;

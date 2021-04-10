@@ -2,17 +2,16 @@ pub use super::super::*;
 
 use super::common::*;
 
-use openssl::ssl::{SslMethod, SslConnector, SslAcceptor, SslVerifyMode};
 use openssl;
+use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
 
-use core::socket::{Socket, OpFlag, OutwardSocket, InwardSocket, BidirectionalSocket};
+use core::message::{Message, TypedMessage};
+use core::socket::{BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, Socket};
 use core::transport::NetworkAddress;
-use core::message::{TypedMessage, Message};
-use std::sync::{Arc};
+use std::sync::Arc;
 
 fn get_private_key() -> openssl::pkey::PKey<openssl::pkey::Private> {
-    let key_string =
-r"-----BEGIN RSA PRIVATE KEY-----
+    let key_string = r"-----BEGIN RSA PRIVATE KEY-----
 MIIEogIBAAKCAQEApPsh1kuBn+n0Pfz8lEU0zls/SMlWsxCdLbZU+7KUXV+JQjWH
 UVwwrp8QJEb4d4Nu/XFoDSBUiqTT5EUPcM2pi/PKlWacd9Pn7ejbs1QqyZyx5Im7
 wb7ZhCJkznH/xGL5TRjQ7smcFuY+9S4lM2QXfY8JPr/OdhY6eiV/hHlZ/KkaZ0Hx
@@ -44,8 +43,7 @@ XrKwBiQVP2H8m+SYNjlJxzcL8DV7kxJqoIOR5tQa4aNZhFW3XN4=
 }
 
 fn get_certificate() -> openssl::x509::X509 {
-    let cert_string =
-r"-----BEGIN CERTIFICATE-----
+    let cert_string = r"-----BEGIN CERTIFICATE-----
 MIIDDTCCAfUCFD4fsnY8ZI6yp1MMVgQtfk+nGLbrMA0GCSqGSIb3DQEBCwUAMEIx
 CzAJBgNVBAYTAkhVMRUwEwYDVQQHDAxEZWZhdWx0IENpdHkxHDAaBgNVBAoME0Rl
 ZmF1bHQgQ29tcGFueSBMdGQwIBcNMjAxMTI5MTU1NTEzWhgPMjI5NDA5MTMxNTU1
@@ -69,31 +67,64 @@ PJT+e7IFIhf2fUJQOB++xmo=
 
 #[test]
 fn simple_req_rep_ssl_test() {
-    let mut requestor = model::reqrep::RequestSocket::new(transport::network::ssl::InitiatorTransport::new(transport::network::ssl::StreamConnectionBuilder::new({let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
-                                                                                                                                                                  builder.set_verify(SslVerifyMode::NONE);
-                                                                                                                                                                  builder}.build())));
-    let mut replier = model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(transport::network::ssl::StreamConnectionBuilder::new({let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
-                                                                                                                                                             builder.set_verify(SslVerifyMode::NONE);
-                                                                                                                                                             builder}.build()),
-                                                                                                      transport::network::ssl::StreamListenerBuilder::new(Arc::new(|| {
-                                                                                                         let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-                                                                                                         builder.set_private_key(get_private_key().as_ref()).unwrap();
-                                                                                                         builder.set_certificate(get_certificate().as_ref()).unwrap();
-                                                                                                         builder.set_verify(SslVerifyMode::NONE);
-                                                                                                         builder.build()
-                                                                                                      }))));
+    let mut requestor =
+        model::reqrep::RequestSocket::new(transport::network::ssl::InitiatorTransport::new(
+            transport::network::ssl::StreamConnectionBuilder::new(
+                {
+                    let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
+                    builder.set_verify(SslVerifyMode::NONE);
+                    builder
+                }
+                .build(),
+            ),
+        ));
+    let mut replier =
+        model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(
+            transport::network::ssl::StreamConnectionBuilder::new(
+                {
+                    let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
+                    builder.set_verify(SslVerifyMode::NONE);
+                    builder
+                }
+                .build(),
+            ),
+            transport::network::ssl::StreamListenerBuilder::new(Arc::new(|| {
+                let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+                builder.set_private_key(get_private_key().as_ref()).unwrap();
+                builder.set_certificate(get_certificate().as_ref()).unwrap();
+                builder.set_verify(SslVerifyMode::NONE);
+                builder.build()
+            })),
+        ));
 
-    replier.bind(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45432".to_string()).unwrap())).unwrap();
-    requestor.connect(core::TransportMethod::Network(NetworkAddress::from_dns("localhost:45432".to_string()).unwrap())).unwrap();
+    replier
+        .bind(core::TransportMethod::Network(
+            NetworkAddress::from_dns("localhost:45432".to_string()).unwrap(),
+        ))
+        .unwrap();
+    requestor
+        .connect(core::TransportMethod::Network(
+            NetworkAddress::from_dns("localhost:45432".to_string()).unwrap(),
+        ))
+        .unwrap();
 
-    let base = TestingStruct{a: 5, b: 5};
+    let base = TestingStruct { a: 5, b: 5 };
     let message = TypedMessage::new(base);
 
     requestor.send_typed(message, OpFlag::NoWait).unwrap();
-    replier.respond_typed(OpFlag::Wait, OpFlag::Wait, |rmessage:TypedMessage<TestingStruct>| {
-        TypedMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
-    }).unwrap();
-    let final_message = requestor.receive_typed::<TestingStruct>(OpFlag::Wait).expect("Hello");
+    replier
+        .respond_typed(
+            OpFlag::Wait,
+            OpFlag::Wait,
+            |rmessage: TypedMessage<TestingStruct>| {
+                TypedMessage::new(rmessage.payload().clone())
+                    .continue_exchange_metadata(rmessage.into_metadata())
+            },
+        )
+        .unwrap();
+    let final_message = requestor
+        .receive_typed::<TestingStruct>(OpFlag::Wait)
+        .expect("Hello");
 
     assert_eq!(base, final_message.into_payload());
 }

@@ -1,27 +1,27 @@
-use core::message::{RawMessage};
-use core::util::thread::{Semaphore, Sleeper};
-use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
-use core::socket::{SocketInternalError};
-use core::queue::{OutwardMessageQueue, InwardMessageQueuePeerSide};
+use core::message::RawMessage;
+use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::socket::SocketInternalError;
 use core::stream;
+use core::util::thread::{Semaphore, Sleeper};
+use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
-use std::thread;
-use std::time::{Duration};
 use std::io;
+use std::thread;
+use std::time::Duration;
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 
 fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<LinearDurationBackoff> {
-    DurationBackoffWithDebounce::new(LinearDurationBackoff::new(
-        Duration::from_millis(0),
-        Duration::from_millis(500),
-        20), 500000)
+    DurationBackoffWithDebounce::new(
+        LinearDurationBackoff::new(Duration::from_millis(0), Duration::from_millis(500), 20),
+        500000,
+    )
 }
 
 #[derive(Debug)]
 pub enum ReadWriteStremConnectionState {
     Busy,
-    Free
+    Free,
 }
 
 impl ReadWriteStremConnectionState {
@@ -41,18 +41,22 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
     outward_queue: OutwardMessageQueue,
-    inward_queue: InwardMessageQueuePeerSide
+    inward_queue: InwardMessageQueuePeerSide,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     /// Creates an instance for a stream object and an inward queue
-    pub fn new(stream: S, outward_queue: OutwardMessageQueue, inward_queue: InwardMessageQueuePeerSide) -> Self {
+    pub fn new(
+        stream: S,
+        outward_queue: OutwardMessageQueue,
+        inward_queue: InwardMessageQueuePeerSide,
+    ) -> Self {
         Self {
             stream: stream,
             reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
             writer: stream::RawMessageWriter::new_empty(),
             outward_queue: outward_queue,
-            inward_queue: inward_queue
+            inward_queue: inward_queue,
         }
     }
 
@@ -62,19 +66,21 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     }
 
     /// Read next chunk from the input stream into [`stream::RawMessageReader`]
-    pub fn process_receiving(&mut self) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
+    pub fn process_receiving(
+        &mut self,
+    ) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
         match self.proceed_receiving() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Remainder) => Ok(ReadWriteStremConnectionState::Busy),
-            Err(stream::State::Empty) => {
-                Ok(ReadWriteStremConnectionState::Free)
-            }
-            Err(stream::State::Stream(err)) => Err(err)
+            Err(stream::State::Empty) => Ok(ReadWriteStremConnectionState::Free),
+            Err(stream::State::Stream(err)) => Err(err),
         }
     }
 
     /// Write next chunk of output into [`stream::RawMessageWriter`]
-    pub fn process_sending(&mut self) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
+    pub fn process_sending(
+        &mut self,
+    ) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
         match self.proceed_sending() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Empty) => {
@@ -85,16 +91,23 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
                 }
             }
             Err(stream::State::Stream(err)) => Err(err),
-            Err(stream::State::Remainder) => panic!("Internal error")
+            Err(stream::State::Remainder) => panic!("Internal error"),
         }
     }
 
     /// Take message from output queue and add it to [`stream::RawMessageWriter`]
     fn dequeue_next_outgoing_message_tro_writer(&mut self) -> Result<(), stream::State> {
         match self.outward_queue.pop_outward_queue() {
-            Some((message, Some(semaphore))) => Ok(self.writer = stream::RawMessageWriter::new_with_semaphore(message, BUFFER_BATCH_SIZE, semaphore)),
-            Some((message, None)) => Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE)),
-            None => Err(stream::State::Empty)
+            Some((message, Some(semaphore))) => Ok(self.writer =
+                stream::RawMessageWriter::new_with_semaphore(
+                    message,
+                    BUFFER_BATCH_SIZE,
+                    semaphore,
+                )),
+            Some((message, None)) => {
+                Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
+            }
+            None => Err(stream::State::Empty),
         }
     }
 
@@ -107,7 +120,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         let messages = self.reader.read_into(&mut self.stream)?;
         if !messages.is_empty() {
-            self.inward_queue.extend_to_inward_queue(messages.into_iter());
+            self.inward_queue
+                .extend_to_inward_queue(messages.into_iter());
         }
         Ok(())
     }
@@ -116,14 +130,14 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
 /// Provides a main loop to continouosly send and receive [`RawMessage`]s through [`ReadWriteStreamConnection`]
 /// This is mainnly intended to be used in a separate thread
 pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write + Send> {
-    stream: ReadWriteStreamConnection<S>
+    stream: ReadWriteStreamConnection<S>,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
-    pub fn construct_from_stream(stream: ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
-        Ok(Self {
-            stream: stream
-        })
+    pub fn construct_from_stream(
+        stream: ReadWriteStreamConnection<S>,
+    ) -> Result<Self, SocketInternalError> {
+        Ok(Self { stream: stream })
     }
 
     pub fn main_loop(mut self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
@@ -150,20 +164,24 @@ pub struct ReadWriteStreamConnectionThreadManager {
     outward_queue: OutwardMessageQueue,
     worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
     last_error: Option<Result<(), SocketInternalError>>,
-    stop_semaphore: Semaphore
+    stop_semaphore: Semaphore,
 }
 
 impl ReadWriteStreamConnectionThreadManager {
-    pub fn execute_thread_for<S: io::Read + io::Write + Send + 'static>(stream: ReadWriteStreamConnection<S>) -> Result<Self, SocketInternalError> {
+    pub fn execute_thread_for<S: io::Read + io::Write + Send + 'static>(
+        stream: ReadWriteStreamConnection<S>,
+    ) -> Result<Self, SocketInternalError> {
         let outward_queue = stream.get_outward_queue();
         let worker = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             outward_queue: outward_queue,
-            worker_thread: Some(thread::spawn(move || { worker.main_loop(stop_semaphore.clone()) } )),
+            worker_thread: Some(thread::spawn(move || {
+                worker.main_loop(stop_semaphore.clone())
+            })),
             last_error: None,
-            stop_semaphore: stop_semaphore_clone
+            stop_semaphore: stop_semaphore_clone,
         })
     }
 
@@ -195,11 +213,13 @@ impl ReadWriteStreamConnectionThreadManager {
         self.check_worker_state()?;
         let completion_semaphore = self.outward_queue.add_to_prio_outward_queue(message);
         loop {
-            let (done_flag, _timeout_guard) = completion_semaphore.wait_timeout(std::time::Duration::from_secs(1)).unwrap();
+            let (done_flag, _timeout_guard) = completion_semaphore
+                .wait_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
             if *done_flag {
-                return Ok(())
+                return Ok(());
             } else if let Err(err) = self.check_worker_state() {
-                return Err(err)
+                return Err(err);
             }
         }
     }
@@ -211,8 +231,10 @@ impl Drop for ReadWriteStreamConnectionThreadManager {
         if self.last_error.is_none() {
             self.stop_semaphore.signal();
             match self.worker_thread.take() {
-                Some(join_handle) => { join_handle.join(); },
-                None => ()
+                Some(join_handle) => {
+                    join_handle.join();
+                }
+                None => (),
             }
         }
     }

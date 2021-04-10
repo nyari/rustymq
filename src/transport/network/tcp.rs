@@ -2,13 +2,13 @@
 //! This module contains the [`crate::core::transport::Transport`] definitions to be able to use TCP based communication
 
 use super::internal::*;
-use core::socket::{SocketInternalError};
-use core::transport::{NetworkAddress};
-use core::queue::{OutwardMessageQueue, InwardMessageQueuePeerSide};
+use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::socket::SocketInternalError;
 use core::stream;
+use core::transport::NetworkAddress;
 
-use std::net;
 use std::io;
+use std::net;
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 1;
 
@@ -56,9 +56,7 @@ impl NetworkListener for net::TcpListener {
 /// # TCP Stream listener builder
 /// This structure is needed for constructing [`AcceptorTransport`]s to configure the underlieing TCP Listener
 #[derive(Clone)]
-pub struct StreamListenerBuilder {
-
-}
+pub struct StreamListenerBuilder {}
 
 impl StreamListenerBuilder {
     /// Construct the stream listener builder
@@ -91,21 +89,43 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = net::TcpStream;
 
-    fn connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
+    fn connect(
+        &self,
+        addr: NetworkAddress,
+        inward_queue: InwardMessageQueuePeerSide,
+    ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         let stream = net::TcpStream::connect(addr)?;
         //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream, OutwardMessageQueue::new(), inward_queue))
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
+        Ok(stream::ReadWriteStreamConnection::new(
+            stream,
+            OutwardMessageQueue::new(),
+            inward_queue,
+        ))
     }
 
-    fn accept_connection(&self, stream: net::TcpStream, _addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
+    fn accept_connection(
+        &self,
+        stream: net::TcpStream,
+        _addr: NetworkAddress,
+        inward_queue: InwardMessageQueuePeerSide,
+    ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        stream.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream, OutwardMessageQueue::new(), inward_queue))
+        stream.set_read_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
+        Ok(stream::ReadWriteStreamConnection::new(
+            stream,
+            OutwardMessageQueue::new(),
+            inward_queue,
+        ))
     }
 }
 
 /// TCP Initiator transport to use with TCP  based connections
 pub type InitiatorTransport = NetworkInitiatorTransport<StreamConnectionBuilder>;
 /// TCP Acceptor transport to use with TCP  based connections
-pub type AcceptorTransport = NetworkAcceptorTransport<net::TcpListener, StreamListenerBuilder, StreamConnectionBuilder>;
+pub type AcceptorTransport =
+    NetworkAcceptorTransport<net::TcpListener, StreamListenerBuilder, StreamConnectionBuilder>;

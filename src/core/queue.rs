@@ -1,9 +1,9 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::collections::{VecDeque};
-use std::time::{Duration};
+use std::time::Duration;
 
-use core::util::thread::{ChgNtfMutex};
-use core::message::{Message, RawMessage, PeerId};
+use core::message::{Message, PeerId, RawMessage};
+use core::util::thread::ChgNtfMutex;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -11,21 +11,21 @@ pub enum QueueOverflowHandling {
     Throttle,
     Drop,
     Error,
-    Panic
+    Panic,
 }
 #[allow(dead_code)]
 pub struct QueueingPolicy {
-    queue_depth: Option<(QueueOverflowHandling, usize)>
+    queue_depth: Option<(QueueOverflowHandling, usize)>,
 }
 
 #[derive(Clone)]
 pub struct OutwardMessageQueue {
     outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<(Arc<ChgNtfMutex<bool>>, RawMessage)>>>
+    prio_outward_queue: Arc<Mutex<VecDeque<(Arc<ChgNtfMutex<bool>>, RawMessage)>>>,
 }
 
 impl OutwardMessageQueue {
-    pub fn new() -> Self{
+    pub fn new() -> Self {
         Self {
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -57,19 +57,22 @@ impl OutwardMessageQueue {
 
 #[derive(Clone)]
 pub struct InwardMessageQueue {
-    inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>
+    inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>,
 }
 
 impl InwardMessageQueue {
     pub fn new() -> Self {
         Self {
-            inward_queue: ChgNtfMutex::new(VecDeque::new())
+            inward_queue: ChgNtfMutex::new(VecDeque::new()),
         }
     }
 
     pub fn new_with_peer_side(peer_id: PeerId) -> (Self, InwardMessageQueuePeerSide) {
         let queue = Self::new();
-        (queue.clone(), InwardMessageQueuePeerSide::new(queue, peer_id))
+        (
+            queue.clone(),
+            InwardMessageQueuePeerSide::new(queue, peer_id),
+        )
     }
 
     pub fn create_peer_side_queue(&self, peer_id: PeerId) -> InwardMessageQueuePeerSide {
@@ -81,7 +84,7 @@ impl InwardMessageQueue {
         inward_queue.push_back(message)
     }
 
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item=RawMessage>>(&self, iterator: T) {
+    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(&self, iterator: T) {
         self.inward_queue.lock_notify().unwrap().extend(iterator);
     }
 
@@ -100,31 +103,36 @@ impl InwardMessageQueue {
         match inward_queue.pop_front() {
             Some(message) => Some(message),
             None => {
-                let (mut invard_queue, _timeout_handle) = self.inward_queue.wait_timeout_on_locked(inward_queue, timeout).unwrap();
+                let (mut invard_queue, _timeout_handle) = self
+                    .inward_queue
+                    .wait_timeout_on_locked(inward_queue, timeout)
+                    .unwrap();
                 invard_queue.pop_front()
-            } 
+            }
         }
     }
 }
 
 pub struct InwardMessageQueuePeerSide {
     queue: InwardMessageQueue,
-    peer_id: PeerId
+    peer_id: PeerId,
 }
 
 impl InwardMessageQueuePeerSide {
     pub fn new(queue: InwardMessageQueue, peer_id: PeerId) -> Self {
         Self {
             queue: queue,
-            peer_id: peer_id
+            peer_id: peer_id,
         }
     }
 
     pub fn add_to_inward_queue(&self, message: RawMessage) {
-        self.queue.add_to_inward_queue(message.apply_peer_id(self.peer_id))
+        self.queue
+            .add_to_inward_queue(message.apply_peer_id(self.peer_id))
     }
 
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item=RawMessage>>(&self, iterator: T) {
-        self.queue.extend_to_inward_queue(iterator.map(|message| {message.apply_peer_id(self.peer_id)}))
+    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(&self, iterator: T) {
+        self.queue
+            .extend_to_inward_queue(iterator.map(|message| message.apply_peer_id(self.peer_id)))
     }
 }

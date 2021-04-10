@@ -2,38 +2,28 @@
 //! The module contains miscellaneous datastructures and functionalities
 //! used by RustyMQ
 
-use rand;
-use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
+use core::serializer::{Deserializer, Serializable, Serializer};
+use rand;
 use std;
 
 /// # Identifier
 /// Used as an identifier in messages as peer and other identifiers
-#[derive(PartialEq)]
-#[derive(Eq)]
-#[derive(PartialOrd)]
-#[derive(Ord)]
-#[derive(Hash)]
-#[derive(Clone)]
-#[derive(Copy)]
-#[derive(Debug)]
-pub struct Identifier
-{
-    core: u64  
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+pub struct Identifier {
+    core: u64,
 }
 
 impl Identifier {
     /// Create a new identifier from seed
     pub fn new(core: u64) -> Self {
-        Self {
-            core:core
-        }
+        Self { core: core }
     }
 
     /// Create a random identifier
     pub fn new_random() -> Self {
         Self {
-            core: rand::random()
+            core: rand::random(),
         }
     }
 
@@ -46,7 +36,7 @@ impl Identifier {
 pub struct VersionInfo {
     main: u16,
     sub: u16,
-    rev: u16
+    rev: u16,
 }
 
 impl VersionInfo {
@@ -54,7 +44,7 @@ impl VersionInfo {
         Self {
             main: 0,
             sub: 0,
-            rev: 0
+            rev: 0,
         }
     }
 
@@ -62,7 +52,7 @@ impl VersionInfo {
         Self {
             main: main,
             sub: sub,
-            rev: rev
+            rev: rev,
         }
     }
 
@@ -80,41 +70,37 @@ impl VersionInfo {
 }
 
 impl Serializable for Identifier {
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
+    fn serialize<T: Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.core);
     }
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
-        Ok(Self::new(
-            deserializer.deserialize()?
-        ))
+    fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+        Ok(Self::new(deserializer.deserialize()?))
     }
 }
 
 impl Serializable for VersionInfo {
-    fn serialize<T:Serializer>(&self, serializer: &mut T) {
+    fn serialize<T: Serializer>(&self, serializer: &mut T) {
         serializer.serialize(&self.main);
         serializer.serialize(&self.sub);
         serializer.serialize(&self.rev);
     }
-    fn deserialize<T:Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+    fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self::new(
             deserializer.deserialize::<u16>()?,
             deserializer.deserialize::<u16>()?,
-            deserializer.deserialize::<u16>()?
+            deserializer.deserialize::<u16>()?,
         ))
     }
 }
 
 /// Iterate through single element
 pub struct SingleIter<T> {
-    item: Option<T>
+    item: Option<T>,
 }
 
 impl<T> SingleIter<T> {
     pub fn new(item: T) -> Self {
-        Self {
-            item: Some(item)
-        }
+        Self { item: Some(item) }
     }
 }
 
@@ -148,7 +134,7 @@ pub mod time {
         low: Duration,
         high: Duration,
         step: Duration,
-        state: Duration
+        state: Duration,
     }
 
     impl LinearDurationBackoff {
@@ -158,7 +144,7 @@ pub mod time {
                 low: low,
                 high: high,
                 step: (high - low) / steps as u32,
-                state: low
+                state: low,
             }
         }
     }
@@ -192,7 +178,7 @@ pub mod time {
     pub struct DurationBackoffWithDebounce<T: DurationBackoff> {
         backoff: T,
         debounce: usize,
-        state: usize
+        state: usize,
     }
 
     impl<T: DurationBackoff> DurationBackoffWithDebounce<T> {
@@ -201,7 +187,7 @@ pub mod time {
             Self {
                 backoff: backoff,
                 debounce: debounce,
-                state: 0
+                state: 0,
             }
         }
     }
@@ -239,7 +225,7 @@ pub mod time {
 /// Timing functionality used internally by RustyMQ
 pub mod thread {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Condvar, Mutex, LockResult, MutexGuard, WaitTimeoutResult, PoisonError};
+    use std::sync::{Arc, Condvar, LockResult, Mutex, MutexGuard, PoisonError, WaitTimeoutResult};
 
     #[inline]
     pub fn sleep(sleep_time: std::time::Duration) {
@@ -250,16 +236,14 @@ pub mod thread {
 
     /// #Sleeper
     /// A helper struct that allows for sleeping the currrent thread according to a duration backoff algorithm
-    pub struct Sleeper<T:super::time::DurationBackoff> {
-        backoff: T
+    pub struct Sleeper<T: super::time::DurationBackoff> {
+        backoff: T,
     }
 
-    impl<T:super::time::DurationBackoff> Sleeper<T> {
+    impl<T: super::time::DurationBackoff> Sleeper<T> {
         /// Construct new sleeper with `backoff` algorithm
         pub fn new(backoff: T) -> Self {
-            Self {
-                backoff: backoff
-            }
+            Self { backoff: backoff }
         }
 
         /// Sleep the current thread according to the next state of the backoff algorithm
@@ -277,39 +261,48 @@ pub mod thread {
     pub fn poll<T, F: Fn() -> Option<T>>(sleep_time: std::time::Duration, operation: F) -> T {
         loop {
             if let Some(result) = operation() {
-                return result
+                return result;
             }
             sleep(sleep_time)
         }
     }
 
     /// Execute `operation` repeadetly until success with `sleep_time` sleep between attemps
-    pub fn poll_mut<T, F: FnMut() -> Option<T>>(sleep_time: std::time::Duration, mut operation: F) -> T {
+    pub fn poll_mut<T, F: FnMut() -> Option<T>>(
+        sleep_time: std::time::Duration,
+        mut operation: F,
+    ) -> T {
         loop {
             if let Some(result) = operation() {
-                return result
+                return result;
             }
             sleep(sleep_time)
         }
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn poll_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(backoff: B, operation: F) -> T {
+    pub fn poll_backoff<T, B: super::time::DurationBackoff, F: Fn() -> Option<T>>(
+        backoff: B,
+        operation: F,
+    ) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
-                return result
+                return result;
             }
             sleeper.sleep()
         }
     }
 
     /// Execute `operation` repeadetly until success with a [`Sleeper`] sleep between each attempt
-    pub fn poll_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(backoff: B, mut operation: F) -> T {
+    pub fn poll_backoff_mut<T, B: super::time::DurationBackoff, F: FnMut() -> Option<T>>(
+        backoff: B,
+        mut operation: F,
+    ) -> T {
         let mut sleeper = Sleeper::new(backoff);
         loop {
             if let Some(result) = operation() {
-                return result
+                return result;
             }
             sleeper.sleep()
         }
@@ -319,17 +312,17 @@ pub mod thread {
     /// Simple semaphore to signal if a thread has stopped
     #[derive(Clone)]
     pub struct Semaphore {
-        semaphore: Arc<AtomicBool>
+        semaphore: Arc<AtomicBool>,
     }
 
     impl Semaphore {
         /// Create semaphore
         pub fn new() -> Self {
             Self {
-                semaphore: Arc::new(AtomicBool::from(false))
+                semaphore: Arc::new(AtomicBool::from(false)),
             }
         }
-        
+
         /// Check if semaphore has been stopped
         pub fn is_signaled(&self) -> bool {
             self.semaphore.load(Ordering::Relaxed)
@@ -347,27 +340,36 @@ pub mod thread {
         }
     }
 
-    pub struct ChangeNotifyMutexGuard<'a, T> 
-        where T: Send + Sync {
+    pub struct ChangeNotifyMutexGuard<'a, T>
+    where
+        T: Send + Sync,
+    {
         internal_mutex_guard: Option<MutexGuard<'a, T>>,
-        mutex: &'a ChangeNotifyMutex<T>
+        mutex: &'a ChangeNotifyMutex<T>,
     }
 
-    impl<'a, T> ChangeNotifyMutexGuard<'a, T> 
-        where T: Send + Sync {
-        pub fn new(mutex: &'a ChangeNotifyMutex<T>) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
+    impl<'a, T> ChangeNotifyMutexGuard<'a, T>
+    where
+        T: Send + Sync,
+    {
+        pub fn new(
+            mutex: &'a ChangeNotifyMutex<T>,
+        ) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
             let internal_mutex_guard = mutex.lock()?;
             Ok(Self {
                 internal_mutex_guard: Some(internal_mutex_guard),
-                mutex: mutex
+                mutex: mutex,
             })
         }
     }
 
     impl<'a, T> Drop for ChangeNotifyMutexGuard<'a, T>
-        where T: Send + Sync {
+    where
+        T: Send + Sync,
+    {
         fn drop(&mut self) {
-            #[allow(unused_must_use)]{
+            #[allow(unused_must_use)]
+            {
                 self.internal_mutex_guard.take().unwrap();
             }
             self.mutex.notify_all();
@@ -375,7 +377,9 @@ pub mod thread {
     }
 
     impl<'a, T> std::ops::Deref for ChangeNotifyMutexGuard<'a, T>
-        where T: Send + Sync {
+    where
+        T: Send + Sync,
+    {
         type Target = T;
         fn deref(&self) -> &Self::Target {
             self.internal_mutex_guard.as_ref().unwrap().deref()
@@ -383,26 +387,32 @@ pub mod thread {
     }
 
     impl<'a, T> std::ops::DerefMut for ChangeNotifyMutexGuard<'a, T>
-        where T: Send + Sync {
+    where
+        T: Send + Sync,
+    {
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.internal_mutex_guard.as_mut().unwrap().deref_mut()
         }
     }
 
-    pub struct ChangeNotifyMutex<T> 
-        where T: Send + Sync {
+    pub struct ChangeNotifyMutex<T>
+    where
+        T: Send + Sync,
+    {
         value: Mutex<T>,
-        var: Condvar
+        var: Condvar,
     }
 
-    pub type ChgNtfMutex<T> = ChangeNotifyMutex<T>; 
+    pub type ChgNtfMutex<T> = ChangeNotifyMutex<T>;
 
     impl<T> ChangeNotifyMutex<T>
-        where T: Send + Sync {
+    where
+        T: Send + Sync,
+    {
         pub fn new(value: T) -> Arc<Self> {
             Arc::new(Self {
                 value: Mutex::new(value),
-                var: Condvar::new()
+                var: Condvar::new(),
             })
         }
 
@@ -410,34 +420,56 @@ pub mod thread {
             self.value.lock()
         }
 
-        pub fn lock_notify<'a>(&'a self) -> Result<ChangeNotifyMutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>> {
-           ChangeNotifyMutexGuard::new(&self) 
+        pub fn lock_notify<'a>(
+            &'a self,
+        ) -> Result<ChangeNotifyMutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>> {
+            ChangeNotifyMutexGuard::new(&self)
         }
 
         pub fn wait<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
             self.wait_on_locked(self.value.lock()?)
         }
 
-        pub fn wait_on_locked<'a>(&'a self, guard: MutexGuard<'a, T>) -> LockResult<MutexGuard<'a, T>> {
+        pub fn wait_on_locked<'a>(
+            &'a self,
+            guard: MutexGuard<'a, T>,
+        ) -> LockResult<MutexGuard<'a, T>> {
             self.var.wait(guard)
-        } 
+        }
 
-        pub fn wait_while<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, condition: F) -> LockResult<MutexGuard<'a, T>> {
+        pub fn wait_while<'a, F: for<'r> FnMut(&'r mut T) -> bool>(
+            &'a self,
+            condition: F,
+        ) -> LockResult<MutexGuard<'a, T>> {
             self.wait_while_on_locked(self.value.lock()?, condition)
         }
 
-        pub fn wait_while_on_locked<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, guard: MutexGuard<'a, T>, condition: F) -> LockResult<MutexGuard<'a, T>> {
+        pub fn wait_while_on_locked<'a, F: for<'r> FnMut(&'r mut T) -> bool>(
+            &'a self,
+            guard: MutexGuard<'a, T>,
+            condition: F,
+        ) -> LockResult<MutexGuard<'a, T>> {
             self.var.wait_while(guard, condition)
         }
 
-        pub fn wait_timeout<'a>(&'a self, timeout: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
-            self.wait_timeout_on_locked(match self.value.lock() {
-                Ok(guard) => Ok(guard),
-                Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None)))
-            }?, timeout)
+        pub fn wait_timeout<'a>(
+            &'a self,
+            timeout: std::time::Duration,
+        ) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            self.wait_timeout_on_locked(
+                match self.value.lock() {
+                    Ok(guard) => Ok(guard),
+                    Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None))),
+                }?,
+                timeout,
+            )
         }
 
-        pub fn wait_timeout_on_locked<'a>(&'a self, mutex_guard: MutexGuard<'a, T>, timeout: std::time::Duration) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+        pub fn wait_timeout_on_locked<'a>(
+            &'a self,
+            mutex_guard: MutexGuard<'a, T>,
+            timeout: std::time::Duration,
+        ) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
             match self.var.wait_timeout(mutex_guard, timeout) {
                 Ok((guard, timeout)) => Ok((guard, Some(timeout))),
                 Err(poison_error) => {
@@ -447,14 +479,27 @@ pub mod thread {
             }
         }
 
-        pub fn wait_timeout_while<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, timeout: std::time::Duration, condition: F) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
-            self.wait_timeout_while_on_locked(match self.value.lock() {
-                Ok(guard) => Ok(guard),
-                Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None)))
-            }?, timeout, condition)
+        pub fn wait_timeout_while<'a, F: for<'r> FnMut(&'r mut T) -> bool>(
+            &'a self,
+            timeout: std::time::Duration,
+            condition: F,
+        ) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+            self.wait_timeout_while_on_locked(
+                match self.value.lock() {
+                    Ok(guard) => Ok(guard),
+                    Err(poison_error) => Err(PoisonError::new((poison_error.into_inner(), None))),
+                }?,
+                timeout,
+                condition,
+            )
         }
 
-        pub fn wait_timeout_while_on_locked<'a, F: for<'r> FnMut(&'r mut T,) -> bool>(&'a self, guard: MutexGuard<'a, T>, timeout: std::time::Duration, condition: F) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
+        pub fn wait_timeout_while_on_locked<'a, F: for<'r> FnMut(&'r mut T) -> bool>(
+            &'a self,
+            guard: MutexGuard<'a, T>,
+            timeout: std::time::Duration,
+            condition: F,
+        ) -> LockResult<(MutexGuard<'a, T>, Option<WaitTimeoutResult>)> {
             match self.var.wait_timeout_while(guard, timeout, condition) {
                 Ok((guard, timeout)) => Ok((guard, Some(timeout))),
                 Err(poison_error) => {
@@ -472,19 +517,25 @@ pub mod thread {
             self.var.notify_all();
         }
 
-        pub fn change_and_notify_all<'a, U, F: Fn(MutexGuard<'a, T>) -> U>(&'a self, operation: F) -> Result<U, LockResult<MutexGuard<'a, T>>> {
+        pub fn change_and_notify_all<'a, U, F: Fn(MutexGuard<'a, T>) -> U>(
+            &'a self,
+            operation: F,
+        ) -> Result<U, LockResult<MutexGuard<'a, T>>> {
             let result = match self.value.lock() {
                 Ok(guard) => Ok(operation(guard)),
-                Err(err) => Err(Err(err))
+                Err(err) => Err(Err(err)),
             };
             self.var.notify_all();
             result
         }
 
-        pub fn change_mut_and_notify_all<'a, U, F: FnMut(MutexGuard<'a, T>) -> U>(&'a self, mut operation: F) -> Result<U, LockResult<MutexGuard<'a, T>>> {
+        pub fn change_mut_and_notify_all<'a, U, F: FnMut(MutexGuard<'a, T>) -> U>(
+            &'a self,
+            mut operation: F,
+        ) -> Result<U, LockResult<MutexGuard<'a, T>>> {
             let result = match self.value.lock() {
                 Ok(guard) => Ok(operation(guard)),
-                Err(err) => Err(Err(err))
+                Err(err) => Err(Err(err)),
             };
             self.var.notify_all();
             result

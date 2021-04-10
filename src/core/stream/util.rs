@@ -1,12 +1,12 @@
-use std::convert::{From};
+use core::socket::SocketInternalError;
+use std::convert::From;
 use std::io;
-use core::socket::{SocketInternalError};
 
 #[derive(Debug)]
 pub enum State {
     Empty,
     Remainder,
-    Stream(SocketInternalError)
+    Stream(SocketInternalError),
 }
 
 impl From<io::Error> for SocketInternalError {
