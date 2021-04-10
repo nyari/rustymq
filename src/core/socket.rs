@@ -97,6 +97,11 @@ impl SocketInternalError {
     pub fn externalize_result<T>(result: Result<T, SocketInternalError>)-> Result<T, SocketError> {
         result.map_err(|x| {SocketError::from(x)})
     }
+
+    /// Create user [`SocketError`] from internal error. Will panic in case of error is not handleable by user
+    pub fn externalize_error(err: SocketInternalError) -> SocketError {
+        SocketError::from(err)
+    }
 }
 
 impl From<SocketInternalError> for SocketError

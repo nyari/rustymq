@@ -6,6 +6,7 @@ pub mod socket;
 pub mod transport;
 pub mod serializer;
 pub mod stream;
+pub mod queue;
 
 #[allow(dead_code)]
 pub mod util;

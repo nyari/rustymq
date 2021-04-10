@@ -2,14 +2,14 @@
 //! This module contains functionality to establish stream based connectons through network
 
 use core::message::{PeerId, Message, RawMessage};
-use core::util;
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{LinearDurationBackoff, DurationBackoffWithDebounce};
 use core::transport::{Transport, InitiatorTransport, AcceptorTransport, TransportMethod, NetworkAddress};
+use core::queue::{InwardMessageQueue, InwardMessageQueuePeerSide};
 use core::socket::{SocketError, SocketInternalError, OpFlag, PeerIdentification};
 use core::stream;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::net;
 use std::net::{SocketAddr};
 use std::thread;
@@ -50,31 +50,33 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static
 {
     type Stream: NetworkStream;
 
-    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
+    fn connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
-    fn accept_connection(&self, sa: (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
+    fn accept_connection(&self, stream: Self::Stream, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
-    fn manager_connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.connect(addr)?)
+    fn manager_connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.connect(addr, inward_queue)?)
     }
 
-    fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.accept_connection((stream, addr))?)
+    fn manager_accept_connection(&self, stream: Self::Stream, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnectionManager, SocketInternalError> {
+        stream::ReadWriteStreamConnectionManager::construct_from_worker_queue(self.accept_connection(stream, addr,  inward_queue)?)
     }
 }
 
-pub struct NetworkConnectionManagerPeers {
+pub struct NetworkConnectionPeerManager {
     peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionManager>,
     addresses: HashMap<SocketAddr, PeerId>,
-    peers: HashMap<PeerId, SocketAddr>
+    peers: HashMap<PeerId, SocketAddr>,
+    inward_queue: InwardMessageQueue
 }
 
-impl NetworkConnectionManagerPeers {
-    pub fn new() -> Self {
+impl NetworkConnectionPeerManager {
+    pub fn new(inward_queue: InwardMessageQueue) -> Self {
         Self {
             peer_table: HashMap::new(),
             addresses: HashMap::new(),
-            peers: HashMap::new()
+            peers: HashMap::new(),
+            inward_queue: inward_queue
         }
     }
 
@@ -87,8 +89,12 @@ impl NetworkConnectionManagerPeers {
     }
 
     pub fn accept_connection<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, (stream, addr): (Stream, NetworkAddress)) -> Result<PeerId, SocketInternalError> {
-        match builder.manager_accept_connection(stream, addr.clone()) {
-            Ok(connection) => self.commit_onnection(connection, addr.get_address()),
+        let peer_id = PeerId::new_random();
+        match builder.manager_accept_connection(stream, addr.clone(), self.inward_queue.create_peer_side_queue(peer_id.clone())) {
+            Ok(connection) => {
+                self.commit_onnection(connection, addr.get_address(), peer_id.clone());
+                Ok(peer_id)
+            },
             Err(_) => Err(SocketInternalError::CouldNotConnect)
         }
     }
@@ -101,27 +107,23 @@ impl NetworkConnectionManagerPeers {
         }
     }
 
-    pub fn receive_from_all_connections(&mut self) -> Vec<Result<RawMessage, (PeerId, SocketInternalError)>> {
-        let mut results = Vec::new();
-        let mut lost_peers = Vec::new();
-        let received_messages: Vec<((Vec<RawMessage>, Option<SocketInternalError>), PeerId)> = self.peer_table.iter_mut().map(|(peer_id, connection)| {(connection.receive_async_all(), peer_id.clone())}).collect();
-        for item in received_messages.into_iter() {
-            match item {
-                ((messages, None), peer_id) => {
-                    results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(&peer_id))) }))
-                },
-                ((messages, Some(err)), peer_id) => {
-                    if !messages.is_empty() {
-                        results.extend(messages.into_iter().map(|message| { Ok(self.set_peer_id_on_received_message(message, &self.get_address_for_peer_id(&peer_id))) }));
-                    }
-                    results.push(Err((peer_id.clone(), err)));
-                    lost_peers.push(peer_id.clone())
-                }
+    pub fn handle_next_error(&mut self) -> Result<(), (Option<PeerId>, SocketInternalError)> {
+        let lost_peer = self.peer_table.iter_mut().find_map(|(peer_id, connection)| {
+            if let Err(err) = connection.check_worker_state() {
+                Some((peer_id.clone(), err))
+            } else {
+                None
             }
-        };
+        });
 
-        lost_peers.into_iter().for_each(|peerid| { self.close_connection(PeerIdentification::PeerId(peerid)).unwrap(); });
-        results
+
+        match lost_peer {
+            Some((peer_id, err)) => {
+                self.close_connection(PeerIdentification::PeerId(peer_id.clone())).unwrap();
+                Err((Some(peer_id.clone()), err))
+            },
+            None => Ok(())
+        }
     }
 
     pub fn query_connected_peers(&self) -> HashSet<PeerId> {
@@ -160,32 +162,20 @@ impl NetworkConnectionManagerPeers {
     }
 
     fn connect_internal<Stream: NetworkStream, Builder: NetworkStreamConnectionBuilder<Stream=Stream>>(&mut self, builder: Builder, address: NetworkAddress) -> Result<PeerId, SocketInternalError> {
-        match builder.manager_connect(address.clone()) {
-            Ok(connection) => self.commit_onnection(connection, address.get_address()),
+        let peer_id = PeerId::new_random();
+        
+        match builder.manager_connect(address.clone(), self.inward_queue.create_peer_side_queue(peer_id.clone())) {
+            Ok(connection) => Ok(self.commit_onnection(connection, address.get_address(), peer_id.clone())),
             Err(_) => Err(SocketInternalError::CouldNotConnect)
-        }
+        }?;
+
+        Ok(peer_id)
     }
 
-    fn get_peer_id_for_address(&self, address: &SocketAddr) -> PeerId {
-        self.addresses.get(address).unwrap().clone()
-    }
-
-    fn get_address_for_peer_id(&self, peer_id: &PeerId) -> SocketAddr {
-        self.peers.get(peer_id).unwrap().clone()
-    } 
-
-    fn set_peer_id_on_received_message(&self, message: RawMessage, address: &SocketAddr) -> RawMessage {
-        message.apply_peer_id(self.get_peer_id_for_address(address))
-    }
-
-    fn commit_onnection(&mut self, connection: stream::ReadWriteStreamConnectionManager, addr: SocketAddr) -> Result<PeerId, SocketInternalError> {
-        let peerid = PeerId::new_random();
-
-        self.peer_table.insert(peerid, connection);
-        self.addresses.insert(addr, peerid);
-        self.peers.insert(peerid, addr);
-
-        Ok(peerid)
+    fn commit_onnection(&mut self, connection: stream::ReadWriteStreamConnectionManager, addr: SocketAddr, peer_id: PeerId) {
+        self.peer_table.insert(peer_id, connection);
+        self.addresses.insert(addr, peer_id);
+        self.peers.insert(peer_id, addr);
     }
 
     fn is_already_connected(&self, address: &SocketAddr) -> bool {
@@ -194,19 +184,20 @@ impl NetworkConnectionManagerPeers {
 }
 
 struct NetworkConnectionManager {
-    peers: Arc<Mutex<NetworkConnectionManagerPeers>>,
-    inward_queue: VecDeque<Result<RawMessage, (PeerId, SocketInternalError)>>
+    peers: Arc<Mutex<NetworkConnectionPeerManager>>,
+    inward_queue: InwardMessageQueue
 }
 
 impl NetworkConnectionManager {
     pub fn new() -> Self {
+        let inward_queue = InwardMessageQueue::new();
         Self {
-            peers: Arc::new(Mutex::new(NetworkConnectionManagerPeers::new())),
-            inward_queue: VecDeque::new()
+            peers: Arc::new(Mutex::new(NetworkConnectionPeerManager::new(inward_queue.clone()))),
+            inward_queue: inward_queue
         }
     }
 
-    pub fn get_peers(&self) -> Arc<Mutex<NetworkConnectionManagerPeers>> {
+    pub fn get_peers(&self) -> Arc<Mutex<NetworkConnectionPeerManager>> {
         self.peers.clone()
     }
 
@@ -225,9 +216,8 @@ impl NetworkConnectionManager {
         peers.close_connection(peer_identification)
     }
 
-    fn receive_from_all_connections(&mut self) {
-        let mut peers = self.peers.lock().unwrap();
-        self.inward_queue.extend(peers.receive_from_all_connections().into_iter())
+    fn handle_next_error(&mut self) -> Result<(), (Option<PeerId>, SocketError)> {
+        self.peers.lock().unwrap().handle_next_error().map_err(|(peer_id, err)| (peer_id, SocketInternalError::externalize_error(err)))
     }
 }
 
@@ -237,24 +227,18 @@ impl Transport for NetworkConnectionManager {
     }
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        self.receive_from_all_connections();
-        let inward_entry_mapper = |inward_entry: Result<RawMessage, (PeerId, SocketInternalError)>| {
-            inward_entry.map_err(|(peer_id, error)| {(Some(peer_id), SocketError::from(error))})
-        };
-
+        self.handle_next_error()?;
         match flags {
             OpFlag::Wait => {
-                if let Some(inward_entry) = self.inward_queue.pop_front() {
-                    inward_entry_mapper(inward_entry)
-                } else {
-                    util::thread::poll_mut(std::time::Duration::from_millis(1), || {
-                        self.receive_from_all_connections();
-                        self.inward_queue.pop_front().map(inward_entry_mapper)
-                    })
+                loop {
+                    match self.inward_queue.receive_one_timeout(Duration::from_secs(1)) {
+                        Some(message) => break Ok(message),
+                        None => self.handle_next_error()?
+                    }
                 }
-            }
+            },
             OpFlag::NoWait => {
-                self.inward_queue.pop_front().map_or(Err((None, SocketError::Timeout)), inward_entry_mapper)
+                self.inward_queue.receive_async_one().ok_or((None, SocketError::Timeout))
             }
         }
     }
@@ -319,13 +303,13 @@ impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport for NetworkInit
 }
 
 pub struct NetworkConnectionListener<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> {
-    manager: Arc<Mutex<NetworkConnectionManagerPeers>>,
+    manager: Arc<Mutex<NetworkConnectionPeerManager>>,
     listener: Listener,
     connection_builder: ConnectionBuilder
 }
 
 impl<Listener: NetworkListener, ConnectionBuilder: NetworkStreamConnectionBuilder<Stream=Listener::Stream>> NetworkConnectionListener<Listener, ConnectionBuilder> {
-    pub fn bind<ListenerBuilder: NetworkListenerBuilder<Listener=Listener>>(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder, addr: NetworkAddress, manager: Arc<Mutex<NetworkConnectionManagerPeers>>) -> Result<Self, SocketInternalError> {
+    pub fn bind<ListenerBuilder: NetworkListenerBuilder<Listener=Listener>>(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder, addr: NetworkAddress, manager: Arc<Mutex<NetworkConnectionPeerManager>>) -> Result<Self, SocketInternalError> {
         Ok(Self {
             manager: manager,
             listener: listener_builder.bind(addr)?,

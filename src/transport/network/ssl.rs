@@ -8,6 +8,7 @@ use std::net::{SocketAddr};
 
 use core::socket::{SocketInternalError};
 use core::transport::{NetworkAddress};
+use core::queue::{InwardMessageQueuePeerSide};
 use core::stream;
 
 use std::sync::Arc;
@@ -125,7 +126,7 @@ impl StreamConnectionBuilder {
 impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     type Stream = SslStream<net::TcpStream>;
 
-    fn connect(&self, addr: NetworkAddress) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
+    fn connect(&self, addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let dns_address = addr.get_dns_name().ok_or(SocketInternalError::MissingDNSDomain)?;
         let stream = net::TcpStream::connect(addr.get_address())?;
 
@@ -134,7 +135,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 let stream_mut_ref = ssl_stream.get_mut();
                 stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
                 stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-                Ok(stream::ReadWriteStreamConnection::new(ssl_stream))
+                Ok(stream::ReadWriteStreamConnection::new(ssl_stream, inward_queue))
             }
             Err(_) => {
                 Err(SocketInternalError::HandshakeFailed)
@@ -142,11 +143,11 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         }
     }
 
-    fn accept_connection(&self, (mut stream, _addr): (Self::Stream, NetworkAddress)) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
+    fn accept_connection(&self, mut stream: Self::Stream, _addr: NetworkAddress, inward_queue: InwardMessageQueuePeerSide) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let stream_mut_ref = stream.get_mut();
         stream_mut_ref.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream_mut_ref.set_read_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
-        Ok(stream::ReadWriteStreamConnection::new(stream))
+        Ok(stream::ReadWriteStreamConnection::new(stream, inward_queue))
     }
 }
 
