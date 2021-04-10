@@ -113,6 +113,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     }
 }
 
+/// Provides a main loop to continouosly send and receive [`RawMessage`]s through [`ReadWriteStreamConnection`]
+/// This is mainnly intended to be used in a separate thread
 pub struct ReadWriteStreamConnectionWorker<S: io::Read + io::Write + Send> {
     stream: ReadWriteStreamConnection<S>
 }
