@@ -17,8 +17,7 @@ pub type QueueingPolicy = (QueueOverflowHandling, usize);
 
 #[derive(Clone)]
 pub struct OutwardMessageQueue {
-    outward_queue: Arc<Mutex<VecDeque<RawMessage>>>,
-    prio_outward_queue: Arc<Mutex<VecDeque<(Arc<ChgNtfMutex<bool>>, RawMessage)>>>,
+    outward_queue: Arc<Mutex<VecDeque<(RawMessage, Option<Arc<ChgNtfMutex<bool>>>)>>>,
     policy: Option<QueueingPolicy>,
 }
 
@@ -26,31 +25,24 @@ impl OutwardMessageQueue {
     pub fn new() -> Self {
         Self {
             outward_queue: Arc::new(Mutex::new(VecDeque::new())),
-            prio_outward_queue: Arc::new(Mutex::new(VecDeque::new())),
             policy: None
         }
     }
 
     pub fn add_to_outward_queue(&self, message: RawMessage) {
         let mut outward_queue = self.outward_queue.lock().unwrap();
-        outward_queue.push_back(message);
+        outward_queue.push_back((message, None));
     }
 
     pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Arc<ChgNtfMutex<bool>> {
-        let mut prio_outward_queue = self.prio_outward_queue.lock().unwrap();
+        let mut outward_queue = self.outward_queue.lock().unwrap();
         let semaphore = ChgNtfMutex::new(false);
-        prio_outward_queue.push_back((semaphore.clone(), message));
+        outward_queue.push_front((message, Some(semaphore.clone())));
         semaphore
     }
 
     pub fn pop_outward_queue(&self) -> Option<(RawMessage, Option<Arc<ChgNtfMutex<bool>>>)> {
-        if let Some((semaphore, message)) = self.prio_outward_queue.lock().unwrap().pop_front() {
-            Some((message, Some(semaphore)))
-        } else if let Some(message) = self.outward_queue.lock().unwrap().pop_front() {
-            Some((message, None))
-        } else {
-            None
-        }
+        self.outward_queue.lock().unwrap().pop_front()
     }
 }
 
