@@ -78,7 +78,13 @@ where
                     Err(SocketInternalError::QueueDepthReached)
                 }
             }
-            _ => panic!("Could not queue message"),
+            Some((QueueOverflowHandling::Panic, queue_depth)) => {
+                let mut queue = self.queue.lock_notify().unwrap();
+                if queue.len() >= *queue_depth {
+                    panic!("Queue full");
+                }
+                Ok(modifier(queue.deref_mut()))
+            }
         }
     }
 
