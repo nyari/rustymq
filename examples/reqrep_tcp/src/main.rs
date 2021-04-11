@@ -36,12 +36,12 @@ fn main() {
     let transport_method = TransportMethod::Network(NetworkAddress::from_dns(arguments.value_of("address").unwrap().to_string()).unwrap());
     
     if arguments.value_of("mode").unwrap() == "server".to_string() {
-        let mut socket = ReplySocket::new(AcceptorTransport::new(StreamConnectionBuilder::new(), StreamListenerBuilder::new()));
+        let mut socket = ReplySocket::new(AcceptorTransport::new(StreamConnectionBuilder::new(), StreamListenerBuilder::new())).unwrap();
         socket.bind(transport_method).unwrap();
         let server = server::OperationServer::new(socket);
         server.execute_threads(8);
     } else if arguments.value_of("mode").unwrap() == "client".to_string() {
-        let mut socket = RequestSocket::new(InitiatorTransport::new(StreamConnectionBuilder::new()));
+        let mut socket = RequestSocket::new(InitiatorTransport::new(StreamConnectionBuilder::new())).unwrap();
         socket.connect(transport_method).unwrap();
         let client = client::OperationClient::new(socket);
         client.execute_client();
