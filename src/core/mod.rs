@@ -1,13 +1,13 @@
 //! # Core module
 //! Core datastructures, traits and enums for use in RustyMQ
 
+pub mod config;
 pub mod message;
 pub mod queue;
 pub mod serializer;
 pub mod socket;
 pub mod stream;
 pub mod transport;
-pub mod config;
 
 #[allow(dead_code)]
 pub mod util;

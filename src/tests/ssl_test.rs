@@ -77,7 +77,8 @@ fn simple_req_rep_ssl_test() {
                 }
                 .build(),
             ),
-        )).unwrap();
+        ))
+        .unwrap();
     let mut replier =
         model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(
             transport::network::ssl::StreamConnectionBuilder::new(
@@ -95,7 +96,8 @@ fn simple_req_rep_ssl_test() {
                 builder.set_verify(SslVerifyMode::NONE);
                 builder.build()
             })),
-        )).unwrap();
+        ))
+        .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(

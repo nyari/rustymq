@@ -361,8 +361,8 @@ pub mod thread {
 
         pub fn with_mutex_ref(
             mutex: &'a ChangeNotifyMutex<T>,
-            mutex_ref: MutexGuard<'a, T> 
-        )-> Self {
+            mutex_ref: MutexGuard<'a, T>,
+        ) -> Self {
             Self {
                 internal_mutex_guard: Some(mutex_ref),
                 mutex: mutex,
@@ -382,10 +382,8 @@ pub mod thread {
             #[allow(unused_must_use)]
             {
                 if match self.internal_mutex_guard.take() {
-                    Some(_mutex) => {
-                        true
-                    },
-                    None => false
+                    Some(_mutex) => true,
+                    None => false,
                 } {
                     self.mutex.notify_all();
                 }
@@ -421,7 +419,7 @@ pub mod thread {
     }
 
     pub type ChgNtfMutex<T> = ChangeNotifyMutex<T>;
-    pub type ChgNtfMutexGuard<'a, T> = ChangeNotifyMutexGuard<'a, T>; 
+    pub type ChgNtfMutexGuard<'a, T> = ChangeNotifyMutexGuard<'a, T>;
 
     impl<T> ChangeNotifyMutex<T>
     where
@@ -468,7 +466,7 @@ pub mod thread {
                 Ok(mutex) => Ok(ChangeNotifyMutexGuard::with_mutex_ref(self, mutex)),
                 Err(poison_error) => Err(PoisonError::new({
                     ChangeNotifyMutexGuard::with_mutex_ref(self, poison_error.into_inner())
-                }))
+                })),
             }
         }
 
@@ -521,11 +519,13 @@ pub mod thread {
         ) -> LockResult<(ChangeNotifyMutexGuard<'a, T>, WaitTimeoutResult)> {
             let wait_result = self.var.wait_timeout(guard.into_internal_guard(), timeout);
             match wait_result {
-                Ok((mutex, timeout)) => Ok((ChangeNotifyMutexGuard::with_mutex_ref(self, mutex), timeout)),
+                Ok((mutex, timeout)) => {
+                    Ok((ChangeNotifyMutexGuard::with_mutex_ref(self, mutex), timeout))
+                }
                 Err(poison_error) => Err(PoisonError::new({
                     let (mutex, timeout) = poison_error.into_inner();
                     (ChangeNotifyMutexGuard::with_mutex_ref(self, mutex), timeout)
-                }))
+                })),
             }
         }
 

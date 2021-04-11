@@ -7,6 +7,7 @@ use openssl::ssl::{SslAcceptor, SslConnector, SslStream};
 use std::net::SocketAddr;
 
 use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::config::{TransportConfiguration};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::transport::NetworkAddress;
@@ -131,6 +132,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
     fn connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
@@ -150,7 +152,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                 )))?;
                 Ok(stream::ReadWriteStreamConnection::new(
                     ssl_stream,
-                    OutwardMessageQueue::new(),
+                    OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
                     inward_queue,
                 ))
             }
@@ -160,6 +162,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
     fn accept_connection(
         &self,
+        config: &TransportConfiguration,
         mut stream: Self::Stream,
         _addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
@@ -173,7 +176,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         )))?;
         Ok(stream::ReadWriteStreamConnection::new(
             stream,
-            OutwardMessageQueue::new(),
+            OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
             inward_queue,
         ))
     }

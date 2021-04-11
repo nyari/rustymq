@@ -37,16 +37,16 @@
 //! # }
 //! ```
 
+use core::config::TransportConfiguration;
 use core::message::{
     ConversationId, Message, MessageMetadata, Part, PartError, PeerId, RawMessage,
 };
+use core::queue::QueueOverflowHandling;
 use core::socket::{
     BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket,
     SocketError, SocketInternalError,
 };
-use core::transport::{AcceptorTransport, InitiatorTransport, TransportMethod, Transport};
-use core::config::{TransportConfiguration};
-use core::queue::{QueueOverflowHandling};
+use core::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
 
 use std::collections::HashMap;
 
@@ -220,19 +220,21 @@ impl ConnectionTracker {
     }
 }
 
-fn validate_transport_configuration<T: Transport> (transport: &T) -> Result<(), TransportConfiguration> {
+fn validate_transport_configuration<T: Transport>(
+    transport: &T,
+) -> Result<(), TransportConfiguration> {
     match transport.query_configuration() {
         Some(config) => {
             match config.queue_policy {
                 Some((QueueOverflowHandling::Drop, depth)) => {
                     return Err(TransportConfiguration::new()
-                            .with_queue_policy(Some((QueueOverflowHandling::Drop, depth))))
+                        .with_queue_policy(Some((QueueOverflowHandling::Drop, depth))))
                 }
                 _ => {}
             }
             Ok(())
-        },
-        None => Ok(())
+        }
+        None => Ok(()),
     }
 }
 

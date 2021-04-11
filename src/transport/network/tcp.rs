@@ -2,6 +2,7 @@
 //! This module contains the [`crate::core::transport::Transport`] definitions to be able to use TCP based communication
 
 use super::internal::*;
+use core::config::TransportConfiguration;
 use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
 use core::socket::SocketInternalError;
 use core::stream;
@@ -91,6 +92,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
 
     fn connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
     ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
@@ -101,13 +103,14 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         )))?;
         Ok(stream::ReadWriteStreamConnection::new(
             stream,
-            OutwardMessageQueue::new(),
+            OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
             inward_queue,
         ))
     }
 
     fn accept_connection(
         &self,
+        config: &TransportConfiguration,
         stream: net::TcpStream,
         _addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
@@ -118,7 +121,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         )))?;
         Ok(stream::ReadWriteStreamConnection::new(
             stream,
-            OutwardMessageQueue::new(),
+            OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
             inward_queue,
         ))
     }

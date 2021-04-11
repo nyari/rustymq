@@ -4,9 +4,9 @@ pub mod network;
 
 pub use self::network::NetworkAddress;
 
+use core::config::TransportConfiguration;
 use core::message::{PeerId, RawMessage};
 use core::socket::{OpFlag, PeerIdentification, SocketError};
-use core::config::{TransportConfiguration};
 use std::any;
 use std::collections::HashSet;
 

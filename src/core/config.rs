@@ -1,18 +1,19 @@
-use std::any::{Any};
+use std::any::Any;
+use std::sync::Arc;
 
-use core::queue::{QueueingPolicy};
+use core::queue::QueueingPolicy;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransportConfiguration {
     pub queue_policy: Option<QueueingPolicy>,
-    pub extra: Option<Box<dyn Any>>,
+    pub extra: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl TransportConfiguration {
     pub fn new() -> Self {
         Self {
             queue_policy: None,
-            extra: None
+            extra: None,
         }
     }
 
@@ -23,7 +24,7 @@ impl TransportConfiguration {
         }
     }
 
-    pub fn with_extra(self, extra: Option<Box<dyn Any>>) -> Self {
+    pub fn with_extra(self, extra: Option<Arc<dyn Any + Send + Sync>>) -> Self {
         Self {
             extra: extra,
             ..self

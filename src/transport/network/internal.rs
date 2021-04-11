@@ -1,10 +1,10 @@
 //! # Internal helper module for network connections
 //! This module contains functionality to establish stream based connectons through network
 
+use core::config::TransportConfiguration;
 use core::message::{Message, PeerId, RawMessage};
 use core::queue::{InwardMessageQueue, InwardMessageQueuePeerSide};
 use core::socket::{OpFlag, PeerIdentification, SocketError, SocketInternalError};
-use core::config::{TransportConfiguration};
 use core::stream;
 use core::transport::{
     AcceptorTransport, InitiatorTransport, NetworkAddress, Transport, TransportMethod,
@@ -55,12 +55,14 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
 
     fn connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn accept_connection(
         &self,
+        config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
@@ -68,21 +70,26 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
 
     fn manager_connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(
-            self.connect(addr, inward_queue)?,
-        )
+        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.connect(
+            config,
+            addr,
+            inward_queue,
+        )?)
     }
 
     fn manager_accept_connection(
         &self,
+        config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
         inward_queue: InwardMessageQueuePeerSide,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.accept_connection(
+            config,
             stream,
             addr,
             inward_queue,
@@ -95,15 +102,17 @@ pub struct NetworkConnectionPeerManager {
     addresses: HashMap<SocketAddr, PeerId>,
     peers: HashMap<PeerId, SocketAddr>,
     inward_queue: InwardMessageQueue,
+    config: TransportConfiguration,
 }
 
 impl NetworkConnectionPeerManager {
-    pub fn new(inward_queue: InwardMessageQueue) -> Self {
+    pub fn new(inward_queue: InwardMessageQueue, config: TransportConfiguration) -> Self {
         Self {
             peer_table: HashMap::new(),
             addresses: HashMap::new(),
             peers: HashMap::new(),
             inward_queue: inward_queue,
+            config: config,
         }
     }
 
@@ -132,6 +141,7 @@ impl NetworkConnectionPeerManager {
     ) -> Result<PeerId, SocketInternalError> {
         let peer_id = PeerId::new_random();
         match builder.manager_accept_connection(
+            &self.config,
             stream,
             addr.clone(),
             self.inward_queue.create_peer_side_queue(peer_id.clone()),
@@ -239,6 +249,7 @@ impl NetworkConnectionPeerManager {
         let peer_id = PeerId::new_random();
 
         match builder.manager_connect(
+            &self.config,
             address.clone(),
             self.inward_queue.create_peer_side_queue(peer_id.clone()),
         ) {
@@ -273,11 +284,12 @@ struct NetworkConnectionManager {
 }
 
 impl NetworkConnectionManager {
-    pub fn new() -> Self {
-        let inward_queue = InwardMessageQueue::new();
+    pub fn new(config: TransportConfiguration) -> Self {
+        let inward_queue = InwardMessageQueue::new().with_policy(config.queue_policy.clone());
         Self {
             peers: Arc::new(Mutex::new(NetworkConnectionPeerManager::new(
                 inward_queue.clone(),
+                config.clone(),
             ))),
             inward_queue: inward_queue,
         }
@@ -373,13 +385,24 @@ impl Transport for NetworkConnectionManager {
 pub struct NetworkInitiatorTransport<Builder: NetworkStreamConnectionBuilder> {
     manager: NetworkConnectionManager,
     builder: Builder,
+    config: TransportConfiguration,
 }
 
 impl<Builder: NetworkStreamConnectionBuilder> NetworkInitiatorTransport<Builder> {
     pub fn new(builder: Builder) -> Self {
+        let config = TransportConfiguration::new();
         Self {
-            manager: NetworkConnectionManager::new(),
+            manager: NetworkConnectionManager::new(config.clone()),
             builder: builder,
+            config: config,
+        }
+    }
+
+    pub fn with_configuration(builder: Builder, config: TransportConfiguration) -> Self {
+        Self {
+            manager: NetworkConnectionManager::new(config.clone()),
+            builder: builder,
+            config: config,
         }
     }
 }
@@ -405,7 +428,7 @@ impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTran
     }
 
     fn query_configuration(&self) -> Option<&TransportConfiguration> {
-        None
+        Some(&self.config)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -510,7 +533,23 @@ where
     pub fn new(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder) -> Self {
         let stop_semaphore = Semaphore::new();
         Self {
-            manager: NetworkConnectionManager::new(),
+            manager: NetworkConnectionManager::new(TransportConfiguration::new()),
+            listener_thread: None,
+            stop_semaphore: stop_semaphore,
+            listener_builder: listener_builder,
+            connection_builder: connection_builder,
+            _listener: PhantomData,
+        }
+    }
+
+    pub fn with_config(
+        connection_builder: ConnectionBuilder,
+        listener_builder: ListenerBuilder,
+        config: TransportConfiguration,
+    ) -> Self {
+        let stop_semaphore = Semaphore::new();
+        Self {
+            manager: NetworkConnectionManager::new(config),
             listener_thread: None,
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,

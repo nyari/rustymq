@@ -1,10 +1,10 @@
-use std::{collections::VecDeque, ops::DerefMut};
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::time::Duration;
+use std::{collections::VecDeque, ops::DerefMut};
 
-use core::socket::{SocketInternalError};
 use core::message::{Message, PeerId, RawMessage};
-use core::util::thread::{ChgNtfMutex};
+use core::socket::SocketInternalError;
+use core::util::thread::ChgNtfMutex;
 
 #[derive(Debug, Clone)]
 pub enum QueueOverflowHandling {
@@ -19,28 +19,37 @@ pub type QueueingPolicy = (QueueOverflowHandling, usize);
 
 struct QueuePolicyEnforcer<'a, T>
 where
-    T: Send + Sync {
+    T: Send + Sync,
+{
     queue: &'a ChgNtfMutex<VecDeque<T>>,
-    policy: &'a Option<QueueingPolicy>
+    policy: &'a Option<QueueingPolicy>,
 }
 
 impl<'a, T> QueuePolicyEnforcer<'a, T>
 where
-    T: Send + Sync {
+    T: Send + Sync,
+{
     pub fn new(queue: &'a ChgNtfMutex<VecDeque<T>>, policy: &'a Option<QueueingPolicy>) -> Self {
         Self {
             queue: queue,
-            policy: policy
+            policy: policy,
         }
     }
 
-    fn grow_queue<F: FnOnce(&mut VecDeque<T>)>(&self, modifier: F) -> Result<(), SocketInternalError> {
+    fn grow_queue<F: FnOnce(&mut VecDeque<T>)>(
+        &self,
+        modifier: F,
+    ) -> Result<(), SocketInternalError> {
         match self.policy {
             None => Ok(modifier(self.queue.lock_notify().unwrap().deref_mut())),
             Some((QueueOverflowHandling::Throttle, queue_depth)) => {
                 let mut queue = self.queue.lock_notify().unwrap();
                 while queue.len() >= *queue_depth {
-                    queue = self.queue.wait_timeout_on_lock_notified(queue, std::time::Duration::from_secs(1)).unwrap().0;
+                    queue = self
+                        .queue
+                        .wait_timeout_on_lock_notified(queue, std::time::Duration::from_secs(1))
+                        .unwrap()
+                        .0;
                 }
                 Ok(modifier(queue.deref_mut()))
             }
@@ -81,7 +90,10 @@ where
         self.grow_queue(|queue| queue.push_back(value))
     }
 
-    pub fn extend<I: std::iter::Iterator<Item = T>>(&'a self, iter: I) -> Result<(), SocketInternalError> {
+    pub fn extend<I: std::iter::Iterator<Item = T>>(
+        &'a self,
+        iter: I,
+    ) -> Result<(), SocketInternalError> {
         for item in iter {
             self.push_back(item)?
         }
@@ -95,7 +107,7 @@ where
     pub fn pop_all(&'a self) -> Vec<T> {
         self.queue.lock_notify().unwrap().drain(..).collect()
     }
- }
+}
 
 #[derive(Clone)]
 pub struct OutwardMessageQueue {
@@ -107,7 +119,14 @@ impl OutwardMessageQueue {
     pub fn new() -> Self {
         Self {
             outward_queue: Arc::new(ChgNtfMutex::new(VecDeque::new())),
-            policy: None
+            policy: None,
+        }
+    }
+
+    pub fn with_policy(self, policy: Option<QueueingPolicy>) -> Self {
+        Self {
+            policy: policy,
+            ..self
         }
     }
 
@@ -115,9 +134,13 @@ impl OutwardMessageQueue {
         QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).push_back((message, None))
     }
 
-    pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Result<Arc<ChgNtfMutex<bool>>, SocketInternalError> {
+    pub fn add_to_prio_outward_queue(
+        &self,
+        message: RawMessage,
+    ) -> Result<Arc<ChgNtfMutex<bool>>, SocketInternalError> {
         let semaphore = ChgNtfMutex::new_arc(false);
-        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).push_front((message, Some(semaphore.clone())))?;
+        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy)
+            .push_front((message, Some(semaphore.clone())))?;
         Ok(semaphore)
     }
 
@@ -136,7 +159,7 @@ impl InwardMessageQueue {
     pub fn new() -> Self {
         Self {
             inward_queue: ChgNtfMutex::new_arc(VecDeque::new()),
-            policy: None
+            policy: None,
         }
     }
 
@@ -163,7 +186,10 @@ impl InwardMessageQueue {
         QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).push_back(message)
     }
 
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(&self, iterator: T) -> Result<(), SocketInternalError> {
+    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
+        &self,
+        iterator: T,
+    ) -> Result<(), SocketInternalError> {
         QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).extend(iterator)
     }
 
@@ -208,7 +234,10 @@ impl InwardMessageQueuePeerSide {
             .add_to_inward_queue(message.apply_peer_id(self.peer_id))
     }
 
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(&self, iterator: T) -> Result<(), SocketInternalError> {
+    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
+        &self,
+        iterator: T,
+    ) -> Result<(), SocketInternalError> {
         self.queue
             .extend_to_inward_queue(iterator.map(|message| message.apply_peer_id(self.peer_id)))
     }
