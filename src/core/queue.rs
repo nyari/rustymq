@@ -1,16 +1,17 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::{collections::VecDeque, ops::DerefMut};
+use std::sync::{Arc};
 use std::time::Duration;
 
 use core::socket::{SocketInternalError};
 use core::message::{Message, PeerId, RawMessage};
-use core::util::thread::{ChgNtfMutex, ChgNtfMutexGuard};
+use core::util::thread::{ChgNtfMutex};
 
 #[derive(Debug, Clone)]
 pub enum QueueOverflowHandling {
     Throttle,
     Drop,
-    Error,
+    ErrorAndDrop,
+    ErrorAndForceExtend,
     Panic,
 }
 
@@ -33,24 +34,66 @@ where
         }
     }
 
+    fn grow_queue<F: FnOnce(&mut VecDeque<T>)>(&self, modifier: F) -> Result<(), SocketInternalError> {
+        match self.policy {
+            None => Ok(modifier(self.queue.lock_notify().unwrap().deref_mut())),
+            Some((QueueOverflowHandling::Throttle, queue_depth)) => {
+                let mut queue = self.queue.lock_notify().unwrap();
+                while queue.len() >= *queue_depth {
+                    queue = self.queue.wait_timeout_on_lock_notified(queue, std::time::Duration::from_secs(1)).unwrap().0;
+                }
+                Ok(modifier(queue.deref_mut()))
+            }
+            Some((QueueOverflowHandling::Drop, queue_depth)) => {
+                let mut queue = self.queue.lock_notify().unwrap();
+                if queue.len() < *queue_depth {
+                    modifier(queue.deref_mut());
+                }
+                Ok(())
+            }
+            Some((QueueOverflowHandling::ErrorAndDrop, queue_depth)) => {
+                let mut queue = self.queue.lock_notify().unwrap();
+                if queue.len() < *queue_depth {
+                    modifier(queue.deref_mut());
+                    Ok(())
+                } else {
+                    Err(SocketInternalError::QueueDepthReached)
+                }
+            }
+            Some((QueueOverflowHandling::ErrorAndForceExtend, queue_depth)) => {
+                let mut queue = self.queue.lock_notify().unwrap();
+                modifier(queue.deref_mut());
+                if queue.len() <= *queue_depth {
+                    Ok(())
+                } else {
+                    Err(SocketInternalError::QueueDepthReached)
+                }
+            }
+            _ => panic!("Could not queue message"),
+        }
+    }
+
     pub fn push_front(&'a self, value: T) -> Result<(), SocketInternalError> {
-        Ok(())
+        self.grow_queue(|queue| queue.push_front(value))
     }
 
     pub fn push_back(&'a self, value: T) -> Result<(), SocketInternalError> {
-        Ok(())
+        self.grow_queue(|queue| queue.push_back(value))
     }
 
     pub fn extend<I: std::iter::Iterator<Item = T>>(&'a self, iter: I) -> Result<(), SocketInternalError> {
+        for item in iter {
+            self.push_back(item)?
+        }
         Ok(())
     }
 
     pub fn pop_front(&'a self) -> Option<T> {
-        None
+        self.queue.lock_notify().unwrap().pop_front()
     }
 
     pub fn pop_all(&'a self) -> Vec<T> {
-        Vec::new()
+        self.queue.lock_notify().unwrap().drain(..).collect()
     }
  }
 
@@ -74,7 +117,7 @@ impl OutwardMessageQueue {
 
     pub fn add_to_prio_outward_queue(&self, message: RawMessage) -> Result<Arc<ChgNtfMutex<bool>>, SocketInternalError> {
         let semaphore = ChgNtfMutex::new_arc(false);
-        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).push_back((message, Some(semaphore.clone())))?;
+        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).push_front((message, Some(semaphore.clone())))?;
         Ok(semaphore)
     }
 

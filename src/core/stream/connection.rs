@@ -121,7 +121,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         let messages = self.reader.read_into(&mut self.stream)?;
         if !messages.is_empty() {
             self.inward_queue
-                .extend_to_inward_queue(messages.into_iter());
+                .extend_to_inward_queue(messages.into_iter())?;
         }
         Ok(())
     }
@@ -205,7 +205,7 @@ impl ReadWriteStreamConnectionThreadManager {
 
     pub fn send_async(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
-        self.outward_queue.add_to_outward_queue(message);
+        self.outward_queue.add_to_outward_queue(message)?;
         Ok(())
     }
 
