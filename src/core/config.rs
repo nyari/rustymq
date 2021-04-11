@@ -5,7 +5,7 @@ use core::queue::{QueueingPolicy};
 #[derive(Debug)]
 pub struct TransportConfiguration {
     pub queue_policy: Option<QueueingPolicy>,
-    pub extra: Option<Box<Any>>,
+    pub extra: Option<Box<dyn Any>>,
 }
 
 impl TransportConfiguration {
@@ -23,7 +23,7 @@ impl TransportConfiguration {
         }
     }
 
-    pub fn with_extra(self, extra: Option<Box<Any>>) -> Self {
+    pub fn with_extra(self, extra: Option<Box<dyn Any>>) -> Self {
         Self {
             extra: extra,
             ..self
