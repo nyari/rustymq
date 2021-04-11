@@ -281,6 +281,7 @@ impl NetworkConnectionPeerManager {
 struct NetworkConnectionManager {
     peers: Arc<Mutex<NetworkConnectionPeerManager>>,
     inward_queue: InwardMessageQueue,
+    config: TransportConfiguration,
 }
 
 impl NetworkConnectionManager {
@@ -292,6 +293,7 @@ impl NetworkConnectionManager {
                 config.clone(),
             ))),
             inward_queue: inward_queue,
+            config
         }
     }
 
@@ -374,7 +376,7 @@ impl Transport for NetworkConnectionManager {
     }
 
     fn query_configuration(&self) -> Option<&TransportConfiguration> {
-        None
+        Some(&self.config)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -520,6 +522,7 @@ where
     stop_semaphore: Semaphore,
     listener_builder: ListenerBuilder,
     connection_builder: ConnectionBuilder,
+    config: TransportConfiguration,
     _listener: PhantomData<Listener>,
 }
 
@@ -538,22 +541,24 @@ where
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,
             connection_builder: connection_builder,
+            config: TransportConfiguration::new(),
             _listener: PhantomData,
         }
     }
 
-    pub fn with_config(
+    pub fn with_configuration(
         connection_builder: ConnectionBuilder,
         listener_builder: ListenerBuilder,
         config: TransportConfiguration,
     ) -> Self {
         let stop_semaphore = Semaphore::new();
         Self {
-            manager: NetworkConnectionManager::new(config),
+            manager: NetworkConnectionManager::new(config.clone()),
             listener_thread: None,
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,
             connection_builder: connection_builder,
+            config: config,
             _listener: PhantomData,
         }
     }
@@ -586,7 +591,7 @@ where
     }
 
     fn query_configuration(&self) -> Option<&TransportConfiguration> {
-        None
+        Some(&self.config)
     }
 
     fn close(self) -> Result<(), SocketError> {
