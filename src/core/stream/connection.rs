@@ -211,7 +211,7 @@ impl ReadWriteStreamConnectionThreadManager {
 
     pub fn send(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
-        let completion_semaphore = self.outward_queue.add_to_prio_outward_queue(message);
+        let completion_semaphore = self.outward_queue.add_to_prio_outward_queue(message)?;
         loop {
             let (done_flag, _timeout_guard) = completion_semaphore
                 .wait_timeout(std::time::Duration::from_secs(1))
