@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::VecDeque, ops::DerefMut};
 
-use core::message::{Message, PeerId, RawMessage};
+use core::message::{RawMessage};
 use core::socket::SocketInternalError;
 use core::util::thread::ChgNtfMutex;
 
@@ -100,10 +100,7 @@ where
         &'a self,
         iter: I,
     ) -> Result<(), SocketInternalError> {
-        for item in iter {
-            self.push_back(item)?
-        }
-        Ok(())
+        self.grow_queue(|queue| queue.extend(iter))
     }
 
     pub fn pop_front(&'a self) -> Option<T> {
@@ -156,16 +153,69 @@ impl OutwardMessageQueue {
 }
 
 #[derive(Clone)]
+pub struct InwardMessageQueueNotifier {
+    signal: Arc<ChgNtfMutex<bool>>
+}
+
+impl InwardMessageQueueNotifier {
+    pub fn new() -> Self {
+        Self {
+            signal: Arc::new(ChgNtfMutex::new(false))
+        }
+    }
+
+    pub fn notify_change(&self) {
+        *self.signal.lock_notify().unwrap() = true;
+    }
+
+    pub fn wait_for_change_timeout(&self, timeout: std::time::Duration) -> bool {
+        let mut signal = self.signal.lock().unwrap();
+        let result = if *signal == true {
+            true
+        } else {
+            signal = self.signal.wait_timeout_on_locked(signal, timeout).unwrap().0;
+            if *signal == true {
+                true
+            } else {
+                false
+            }
+        };
+        *signal = false;
+        result
+    }
+
+    pub fn wait_for_change(&self) -> bool {
+        let mut signal = self.signal.lock().unwrap();
+        if !*signal == true {
+            while !*signal {
+                signal = self.signal.wait_on_locked(signal).unwrap();
+            }
+        };
+        *signal = false;
+        true
+    }
+
+    pub fn take_was_change(&self) -> bool {
+        let mut signal = self.signal.lock().unwrap();
+        let result = *signal;
+        *signal = false;
+        result
+    }
+}
+
+#[derive(Clone)]
 pub struct InwardMessageQueue {
     inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>,
     policy: Option<QueueingPolicy>,
+    notifier: InwardMessageQueueNotifier
 }
 
 impl InwardMessageQueue {
-    pub fn new() -> Self {
+    pub fn new(notifier: InwardMessageQueueNotifier) -> Self {
         Self {
             inward_queue: ChgNtfMutex::new_arc(VecDeque::new()),
             policy: None,
+            notifier: notifier
         }
     }
 
@@ -176,27 +226,19 @@ impl InwardMessageQueue {
         }
     }
 
-    pub fn new_with_peer_side(peer_id: PeerId) -> (Self, InwardMessageQueuePeerSide) {
-        let queue = Self::new();
-        (
-            queue.clone(),
-            InwardMessageQueuePeerSide::new(queue, peer_id),
-        )
-    }
-
-    pub fn create_peer_side_queue(&self, peer_id: PeerId) -> InwardMessageQueuePeerSide {
-        InwardMessageQueuePeerSide::new(self.clone(), peer_id)
-    }
-
     pub fn add_to_inward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
-        QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).push_back(message)
+        let result = QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).push_back(message);
+        self.notifier.notify_change();
+        result
     }
 
     pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
         &self,
         iterator: T,
     ) -> Result<(), SocketInternalError> {
-        QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).extend(iterator)
+        let result = QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).extend(iterator);
+        self.notifier.notify_change();
+        result
     }
 
     pub fn receive_async_all(&self) -> Vec<RawMessage> {
@@ -220,31 +262,47 @@ impl InwardMessageQueue {
             }
         }
     }
-}
 
-pub struct InwardMessageQueuePeerSide {
-    queue: InwardMessageQueue,
-    peer_id: PeerId,
-}
-
-impl InwardMessageQueuePeerSide {
-    pub fn new(queue: InwardMessageQueue, peer_id: PeerId) -> Self {
-        Self {
-            queue: queue,
-            peer_id: peer_id,
+    pub fn receive_one(&self) -> RawMessage {
+        let mut inward_queue = self.inward_queue.lock_notify().unwrap();
+        match inward_queue.pop_front() {
+            Some(message) => message,
+            None => {
+                while inward_queue.is_empty() {  
+                    inward_queue = self
+                        .inward_queue
+                        .wait_on_lock_notified(inward_queue)
+                        .unwrap();
+                }
+                inward_queue.pop_front().unwrap()
+            }
         }
     }
-
-    pub fn add_to_inward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
-        self.queue
-            .add_to_inward_queue(message.apply_peer_id(self.peer_id))
-    }
-
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
-        &self,
-        iterator: T,
-    ) -> Result<(), SocketInternalError> {
-        self.queue
-            .extend_to_inward_queue(iterator.map(|message| message.apply_peer_id(self.peer_id)))
-    }
 }
+
+// pub struct InwardMessageQueuePeerSide {
+//     queue: InwardMessageQueue,
+//     peer_id: PeerId,
+// }
+
+// impl InwardMessageQueuePeerSide {
+//     pub fn new(queue: InwardMessageQueue, peer_id: PeerId) -> Self {
+//         Self {
+//             queue: queue,
+//             peer_id: peer_id,
+//         }
+//     }
+
+//     pub fn add_to_inward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
+//         self.queue
+//             .add_to_inward_queue(message.apply_peer_id(self.peer_id))
+//     }
+
+//     pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
+//         &self,
+//         iterator: T,
+//     ) -> Result<(), SocketInternalError> {
+//         self.queue
+//             .extend_to_inward_queue(iterator.map(|message| message.apply_peer_id(self.peer_id)))
+//     }
+// }

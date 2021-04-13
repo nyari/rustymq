@@ -1,5 +1,5 @@
 use core::message::RawMessage;
-use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::queue::{InwardMessageQueue, OutwardMessageQueue};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::util::thread::{Semaphore, Sleeper};
@@ -41,7 +41,7 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
     outward_queue: OutwardMessageQueue,
-    inward_queue: InwardMessageQueuePeerSide,
+    inward_queue: InwardMessageQueue,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
@@ -49,7 +49,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     pub fn new(
         stream: S,
         outward_queue: OutwardMessageQueue,
-        inward_queue: InwardMessageQueuePeerSide,
+        inward_queue: InwardMessageQueue,
     ) -> Self {
         Self {
             stream: stream,
@@ -63,6 +63,11 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     /// Get a copy if the outward queue to post messages to
     pub fn get_outward_queue(&self) -> OutwardMessageQueue {
         self.outward_queue.clone()
+    }
+
+    /// Get a copy if the outward queue to post messages to
+    pub fn get_inward_queue(&self) -> InwardMessageQueue {
+        self.inward_queue.clone()
     }
 
     /// Read next chunk from the input stream into [`stream::RawMessageReader`]
@@ -162,6 +167,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 
 pub struct ReadWriteStreamConnectionThreadManager {
     outward_queue: OutwardMessageQueue,
+    inward_queue: InwardMessageQueue,
     worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
     last_error: Option<Result<(), SocketInternalError>>,
     stop_semaphore: Semaphore,
@@ -172,11 +178,13 @@ impl ReadWriteStreamConnectionThreadManager {
         stream: ReadWriteStreamConnection<S>,
     ) -> Result<Self, SocketInternalError> {
         let outward_queue = stream.get_outward_queue();
+        let inward_queue = stream.get_inward_queue();
         let worker = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             outward_queue: outward_queue,
+            inward_queue: inward_queue,
             worker_thread: Some(thread::spawn(move || {
                 worker.main_loop(stop_semaphore.clone())
             })),
@@ -222,6 +230,18 @@ impl ReadWriteStreamConnectionThreadManager {
                 return Err(err);
             }
         }
+    }
+
+    pub fn receive_async(&mut self) -> Option<RawMessage> {
+        self.inward_queue.receive_async_one()
+    }
+
+    pub fn receive_async_all(&mut self) -> Vec<RawMessage> {
+        self.inward_queue.receive_async_all()
+    }
+
+    pub fn receive(&mut self) -> RawMessage {
+        self.inward_queue.receive_one()
     }
 }
 
