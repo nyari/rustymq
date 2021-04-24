@@ -1,10 +1,143 @@
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::VecDeque, ops::DerefMut};
+use std::ops::Deref;
 
 use core::message::{RawMessage};
 use core::socket::SocketInternalError;
 use core::util::thread::ChgNtfMutex;
+
+
+#[derive(Copy, Clone)]
+pub enum ReceiptState {
+    /// The message is still in queue
+    InQueue,
+    /// The message has been received but **Processed** state will be provided once message is processed
+    Received,
+    /// The message has been received but the signaling of **Processed** state will not happen 
+    Acknowledged,
+    /// The message has been processed
+    Processed,
+    /// The message did not arrive and will not arrive in future because there are no receivers, or queue has been dropped.
+    Dropped
+}
+
+impl ReceiptState {
+    pub fn in_queue(&self) -> Result<bool, Self> {
+        match self {
+            ReceiptState::InQueue => Ok(true),
+            ReceiptState::Dropped => Err(*self),
+            _ => Ok(false)
+        }
+    }
+
+    pub fn has_been_received(&self) -> Result<bool, Self> {
+        match self {
+            ReceiptState::Received | ReceiptState::Acknowledged | ReceiptState::Processed => Ok(true),
+            ReceiptState::InQueue => Ok(false),
+            _ => return Err(*self),
+        }
+    }
+
+    pub fn has_been_processed(&self) -> Result<bool, Self> {
+        match self {
+            ReceiptState::Processed => Ok(true),
+            ReceiptState::InQueue | ReceiptState::Received => Ok(false),
+            _ => return Err(*self),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ReceiptInternalData(pub Arc<ChgNtfMutex<ReceiptState>>);
+
+impl ReceiptInternalData {
+    pub fn queue() -> Self{ 
+        Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)))
+    }
+}
+
+pub struct SenderReceipt(ReceiptInternalData);
+
+impl SenderReceipt {
+    fn new(internals: ReceiptInternalData) -> Self {
+        Self(internals)
+    } 
+
+    pub fn state(&self) -> ReceiptState {
+        *self.0.0.lock().unwrap()
+    }
+
+    pub fn wait_received(&self) -> Result<ReceiptState, ReceiptState> {
+        let mut locked = self.0.0.lock().unwrap();
+        loop {
+            locked = self.0.0.wait_on_locked(locked).unwrap();
+            if let true = locked.has_been_received()? {
+                return Ok(*locked);
+            } 
+        }
+    }
+
+    pub fn wait_received_timeout(&self, timeout: Duration) -> Result<ReceiptState, ReceiptState> {
+        let mut locked = self.0.0.lock().unwrap();
+        if let true = locked.has_been_received()? {
+            Ok(*locked)
+        } else {
+            locked = self.0.0.wait_on_locked(locked).unwrap();
+            if let true = locked.deref().has_been_received()? {
+                Ok(*locked)
+            } else {
+                Ok(*locked)
+            }
+        }
+    }
+
+    pub fn wait_processed(&self) -> Result<ReceiptState, ReceiptState> {
+        let mut locked = self.0.0.lock().unwrap();
+        loop {
+            locked = self.0.0.wait_on_locked(locked).unwrap();
+            if let true = locked.has_been_processed()? {
+                return Ok(*locked);
+            } 
+        }
+    }
+
+    pub fn wait_processed_timeout(&self, timeout: Duration) -> Result<ReceiptState, ReceiptState> {
+        let mut locked = self.0.0.lock().unwrap();
+        if let true = locked.has_been_processed()? {
+            Ok(*locked)
+        } else {
+            locked = self.0.0.wait_on_locked(locked).unwrap();
+            if let true = locked.deref().has_been_processed()? {
+                Ok(*locked)
+            } else {
+                Ok(*locked)
+            }
+        }
+    }
+}
+
+struct MessageQueueInternalData<T> 
+    where T: Send + Sync {
+    pub queue: VecDeque<(Option<ReceiptInternalData>, T)>,
+    pub receiver_count: usize,
+    pub sender_count: usize
+}
+
+impl<T> MessageQueueInternalData<T>
+    where T: Send + Sync {
+    pub fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            receiver_count: 0,
+            sender_count: 0
+        }
+    }
+}
+
+struct MessageQueueInternal<T>(Arc<ChgNtfMutex<MessageQueueInternalData<T>>>)
+    where T: Send + Sync; 
+
 
 #[derive(Debug, Clone)]
 pub enum QueueOverflowHandling {
