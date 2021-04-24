@@ -269,12 +269,47 @@ impl<T> MessageQueueInternal<T>
         Err(MessageQueueError::Timeout)
     }
 
+    fn receive_timeout_with_receipt(&self, timeout: Duration) -> Result<(Option<ReceiverReceipt>, T), MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        for _ in 0..2 {
+            match locked.queue.pop_front() {
+                Some((receipt, message)) => {
+                    return Ok((receipt.map(|x| ReceiverReceipt::new(x)), message))
+                },
+                None => {
+                    if !locked.has_sender() {
+                        return Err(MessageQueueError::SendersAllDropped)
+                    }
+                }
+            }
+            locked = self.0.wait_timeout_on_lock_notified(locked, timeout).unwrap().0
+        }
+
+        Err(MessageQueueError::Timeout)
+    }
+
     fn receive_async(&self) -> Result<Option<T>, MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
         match locked.queue.pop_front() {
             Some((receipt, message)) => {
                 receipt.map(|x| x.acnkowledged());
                 Ok(Some(message))
+            },
+            None => {
+                if !locked.has_sender() {
+                    Err(MessageQueueError::SendersAllDropped)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    fn receive_async_with_receipt(&self) -> Result<Option<(Option<ReceiverReceipt>, T)>, MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        match locked.queue.pop_front() {
+            Some((receipt, message)) => {
+                Ok(Some((receipt.map(|x| ReceiverReceipt::new(x)), message)))
             },
             None => {
                 if !locked.has_sender() {
