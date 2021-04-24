@@ -213,6 +213,24 @@ impl<T> MessageQueueInternal<T>
         Self(ChgNtfMutex::new_arc(MessageQueueInternalData::new(policy)))
     }
 
+    fn receive(&self) -> Result<T, MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        loop {
+            match locked.queue.pop_front() {
+                Some((receipt, message)) => {
+                    receipt.map(|x| x.acnkowledged());
+                    return Ok(message)
+                },
+                None => {
+                    if !locked.has_sender() {
+                        return Err(MessageQueueError::SendersAllDropped)
+                    }
+                }
+            }
+            locked = self.0.wait_on_lock_notified(locked).unwrap()
+        }
+    }
+
     fn receive_all(&self) -> Result<Vec<T>, MessageQueueError> {
         let result: Vec<T> = self.0.lock_notify()
                                    .unwrap()
@@ -226,8 +244,8 @@ impl<T> MessageQueueInternal<T>
 
         if !result.is_empty() {
             Ok(result)
-        } else if !self.0.lock().unwrap().has_receiver() {
-            Err(MessageQueueError::ReceiversAllDropped)
+        } else if !self.0.lock().unwrap().has_sender() {
+            Err(MessageQueueError::SendersAllDropped)
         } else {
             Ok(result)
         }
@@ -247,8 +265,8 @@ impl<T> MessageQueueInternal<T>
                                                              .collect();
         if !result.is_empty() {
             Ok(result)
-        } else if !self.0.lock().unwrap().has_receiver() {
-            Err(MessageQueueError::ReceiversAllDropped)
+        } else if !self.0.lock().unwrap().has_sender() {
+            Err(MessageQueueError::SendersAllDropped)
         } else {
             Ok(result)
         }
