@@ -17,6 +17,11 @@ pub enum MessageQueueOverflowHandling {
     Panic,
 }
 
+pub enum MessageQueueError {
+    SendersAllDropped,
+    ReceiversAllDropped
+}
+
 pub type MessageQueueingPolicy = (MessageQueueOverflowHandling, usize);
 
 #[derive(Copy, Clone)]
@@ -189,6 +194,14 @@ impl<T> MessageQueueInternalData<T>
             policy: policy
         }
     }
+
+    fn has_receiver(&self) -> bool {
+        self.receiver_count > 0
+    }
+
+    fn has_sender(&self) -> bool {
+        self.sender_count > 0
+    }
 }
 
 struct MessageQueueInternal<T>(Arc<ChgNtfMutex<MessageQueueInternalData<T>>>)
@@ -198,6 +211,47 @@ impl<T> MessageQueueInternal<T>
     where T: Send + Sync {
     fn new(policy: MessageQueueingPolicy) -> Self {
         Self(ChgNtfMutex::new_arc(MessageQueueInternalData::new(policy)))
+    }
+
+    fn receive_all(&self) -> Result<Vec<T>, MessageQueueError> {
+        let result: Vec<T> = self.0.lock_notify()
+                                   .unwrap()
+                                   .queue
+                                   .drain(..)
+                                   .map(|(receipt, message)| {
+                                       receipt.map(|x| x.acnkowledged());
+                                       message
+                                   })
+                                   .collect();
+
+        if !result.is_empty() {
+            Ok(result)
+        } else if !self.0.lock().unwrap().has_receiver() {
+            Err(MessageQueueError::ReceiversAllDropped)
+        } else {
+            Ok(result)
+        }
+    }
+
+    fn receive_all_with_receipt(&self) -> Result<Vec<(Option<ReceiverReceipt>, T)>, MessageQueueError> {
+        let result:Vec<(Option<ReceiverReceipt>, T)> = self.0.lock_notify()
+                                                             .unwrap()
+                                                             .queue
+                                                             .drain(..)
+                                                             .map(|(receipt, message)| {
+                                                                  match receipt {
+                                                                      Some(r) => (Some(ReceiverReceipt::new(r)), message),
+                                                                      None => (None, message)
+                                                                  }
+                                                             })
+                                                             .collect();
+        if !result.is_empty() {
+            Ok(result)
+        } else if !self.0.lock().unwrap().has_receiver() {
+            Err(MessageQueueError::ReceiversAllDropped)
+        } else {
+            Ok(result)
+        }
     }
 }
 //-----------------------------------------------------------------------------------------------------------------------------------------
