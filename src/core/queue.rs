@@ -19,7 +19,8 @@ pub enum MessageQueueOverflowHandling {
 
 pub enum MessageQueueError {
     SendersAllDropped,
-    ReceiversAllDropped
+    ReceiversAllDropped,
+    Timeout
 }
 
 pub type MessageQueueingPolicy = (MessageQueueOverflowHandling, usize);
@@ -229,6 +230,26 @@ impl<T> MessageQueueInternal<T>
             }
             locked = self.0.wait_on_lock_notified(locked).unwrap()
         }
+    }
+
+    fn receive_timeout(&self, timeout: Duration) -> Result<T, MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        for _ in 0..2 {
+            match locked.queue.pop_front() {
+                Some((receipt, message)) => {
+                    receipt.map(|x| x.acnkowledged());
+                    return Ok(message)
+                },
+                None => {
+                    if !locked.has_sender() {
+                        return Err(MessageQueueError::SendersAllDropped)
+                    }
+                }
+            }
+            locked = self.0.wait_timeout_on_lock_notified(locked, timeout).unwrap().0
+        }
+
+        Err(MessageQueueError::Timeout)
     }
 
     fn receive_all(&self) -> Result<Vec<T>, MessageQueueError> {
