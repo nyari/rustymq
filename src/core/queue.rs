@@ -8,6 +8,17 @@ use core::socket::SocketInternalError;
 use core::util::thread::ChgNtfMutex;
 
 
+#[derive(Debug, Clone)]
+pub enum MessageQueueOverflowHandling {
+    Throttle,
+    Drop,
+    ErrorAndDrop,
+    ErrorAndForceExtend,
+    Panic,
+}
+
+pub type MessageQueueingPolicy = (MessageQueueOverflowHandling, usize);
+
 #[derive(Copy, Clone)]
 pub enum ReceiptState {
     /// The message is still in queue
@@ -165,12 +176,12 @@ struct MessageQueueInternalData<T>
     pub queue: VecDeque<(Option<ReceiptInternalData>, T)>,
     pub receiver_count: usize,
     pub sender_count: usize,
-    pub policy: QueueingPolicy
+    pub policy: MessageQueueingPolicy
 }
 
 impl<T> MessageQueueInternalData<T>
     where T: Send + Sync {
-    pub fn new(policy: QueueingPolicy) -> Self {
+    fn new(policy: MessageQueueingPolicy) -> Self {
         Self {
             queue: VecDeque::new(),
             receiver_count: 0,
@@ -181,8 +192,17 @@ impl<T> MessageQueueInternalData<T>
 }
 
 struct MessageQueueInternal<T>(Arc<ChgNtfMutex<MessageQueueInternalData<T>>>)
-    where T: Send + Sync; 
+    where T: Send + Sync;
 
+impl<T> MessageQueueInternal<T>
+    where T: Send + Sync {
+    fn new(policy: MessageQueueingPolicy) -> Self {
+        Self(ChgNtfMutex::new_arc(MessageQueueInternalData::new(policy)))
+    }
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+pub type QueueingPolicy = (QueueOverflowHandling, usize);
 
 #[derive(Debug, Clone)]
 pub enum QueueOverflowHandling {
@@ -192,8 +212,6 @@ pub enum QueueOverflowHandling {
     ErrorAndForceExtend,
     Panic,
 }
-
-pub type QueueingPolicy = (QueueOverflowHandling, usize);
 
 struct QueuePolicyEnforcer<'a, T>
 where
