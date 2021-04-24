@@ -7,6 +7,13 @@ use core::message::{RawMessage};
 use core::socket::SocketInternalError;
 use core::util::thread::ChgNtfMutex;
 
+#[derive(Debug)]
+pub enum MessageQueueError {
+    SendersAllDropped,
+    ReceiversAllDropped,
+    Timeout,
+    QueueFull
+}
 
 #[derive(Debug, Clone)]
 pub enum MessageQueueOverflowHandling {
@@ -15,12 +22,6 @@ pub enum MessageQueueOverflowHandling {
     ErrorAndDrop,
     ErrorAndForceExtend,
     Panic,
-}
-
-pub enum MessageQueueError {
-    SendersAllDropped,
-    ReceiversAllDropped,
-    Timeout
 }
 
 pub type MessageQueueingPolicy = (MessageQueueOverflowHandling, usize);
