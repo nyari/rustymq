@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::VecDeque, ops::DerefMut};
-use std::ops::Deref;
+use std::ops::{Deref, Drop};
 
 use core::message::{RawMessage};
 use core::socket::SocketInternalError;
@@ -46,6 +46,18 @@ impl ReceiptState {
             _ => return Err(*self),
         }
     }
+
+    fn transition(&mut self, state: Self) {
+        let new_state: Result<Self, ()> = match (&self, state) {
+            (Self::InQueue, Self::Received) => Ok(state),
+            (Self::InQueue, Self::Acknowledged) => Ok(state),
+            (Self::Received, Self::Processed) => Ok(state),
+            (_, Self::Dropped) => Ok(state),
+            _ => Err(())
+        };
+
+        *self = new_state.expect("Invalid ReceiptState transition");
+    }
 }
 
 #[derive(Clone)]
@@ -54,6 +66,24 @@ struct ReceiptInternalData(pub Arc<ChgNtfMutex<ReceiptState>>);
 impl ReceiptInternalData {
     pub fn queue() -> Self{ 
         Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)))
+    }
+
+    pub fn sender_receipt(&self) -> SenderReceipt {
+        SenderReceipt::new(self.clone())
+    }
+
+    pub fn receiver_receipt(&self) -> ReceiverReceipt {
+        ReceiverReceipt::new(self.clone())
+    }
+
+    pub fn acnkowledged(self) {
+        self.0.lock_notify().unwrap().transition(ReceiptState::Acknowledged);
+    }
+}
+
+impl Drop for ReceiptInternalData {
+    fn drop(&mut self) {
+        self.0.lock_notify().unwrap().transition(ReceiptState::Dropped);
     }
 }
 
@@ -117,20 +147,35 @@ impl SenderReceipt {
     }
 }
 
+pub struct ReceiverReceipt(ReceiptInternalData);
+
+impl ReceiverReceipt {
+    fn new(internals: ReceiptInternalData) -> Self {
+        internals.0.lock_notify().unwrap().transition(ReceiptState::Received);
+        Self(internals)
+    }
+
+    fn processed(self) {
+        self.0.0.lock_notify().unwrap().transition(ReceiptState::Processed);
+    }
+}
+
 struct MessageQueueInternalData<T> 
     where T: Send + Sync {
     pub queue: VecDeque<(Option<ReceiptInternalData>, T)>,
     pub receiver_count: usize,
-    pub sender_count: usize
+    pub sender_count: usize,
+    pub policy: QueueingPolicy
 }
 
 impl<T> MessageQueueInternalData<T>
     where T: Send + Sync {
-    pub fn new() -> Self {
+    pub fn new(policy: QueueingPolicy) -> Self {
         Self {
             queue: VecDeque::new(),
             receiver_count: 0,
-            sender_count: 0
+            sender_count: 0,
+            policy: policy
         }
     }
 }
