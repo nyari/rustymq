@@ -232,6 +232,23 @@ impl<T> MessageQueueInternal<T>
         }
     }
 
+    fn receive_with_receipt(&self) -> Result<(Option<ReceiverReceipt>, T), MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        loop {
+            match locked.queue.pop_front() {
+                Some((receipt, message)) => {
+                    return Ok((receipt.map(|x| ReceiverReceipt::new(x)), message))
+                },
+                None => {
+                    if !locked.has_sender() {
+                        return Err(MessageQueueError::SendersAllDropped)
+                    }
+                }
+            }
+            locked = self.0.wait_on_lock_notified(locked).unwrap()
+        }
+    }
+
     fn receive_timeout(&self, timeout: Duration) -> Result<T, MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
         for _ in 0..2 {
