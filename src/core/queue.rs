@@ -252,6 +252,23 @@ impl<T> MessageQueueInternal<T>
         Err(MessageQueueError::Timeout)
     }
 
+    fn receive_async(&self) -> Result<Option<T>, MessageQueueError> {
+        let mut locked = self.0.lock_notify().unwrap();
+        match locked.queue.pop_front() {
+            Some((receipt, message)) => {
+                receipt.map(|x| x.acnkowledged());
+                Ok(Some(message))
+            },
+            None => {
+                if !locked.has_sender() {
+                    Err(MessageQueueError::SendersAllDropped)
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
     fn receive_all(&self) -> Result<Vec<T>, MessageQueueError> {
         let result: Vec<T> = self.0.lock_notify()
                                    .unwrap()
