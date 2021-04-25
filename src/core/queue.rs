@@ -25,7 +25,10 @@ pub enum MessageQueueOverflowHandling {
     Panic,
 }
 
-pub type MessageQueueingPolicy = (MessageQueueOverflowHandling, usize);
+#[derive(Clone)]
+pub struct MessageQueueingPolicy {
+    pub overflow: Option<(MessageQueueOverflowHandling, usize)>
+}
 
 #[derive(Copy, Clone)]
 pub enum ReceiptState {
@@ -207,7 +210,14 @@ impl<T> MessageQueueInternalData<T>
     }
 
     fn is_queue_full(&self) -> bool {
-        self.queue.len() >= self.policy.1
+        match self.policy.overflow {
+            Some((_, limit)) => limit <= self.queue.len(),
+            None => false
+        }
+    }
+
+    fn get_overflow_handling(&self) -> Option<MessageQueueOverflowHandling> {
+        self.policy.overflow.clone().map(|x| x.0)
     }
 }
 
@@ -380,15 +390,16 @@ impl<T> MessageQueueInternal<T>
                 locked.queue.push_back((None, message));
                 return Ok(());
             } else {
-                match locked.policy.0 {
-                    MessageQueueOverflowHandling::Throttle => (),
-                    MessageQueueOverflowHandling::Drop => return Ok(()),
-                    MessageQueueOverflowHandling::ErrorAndDrop => return Err(MessageQueueError::QueueFull),
-                    MessageQueueOverflowHandling::ErrorAndForceExtend => {
+                match locked.get_overflow_handling() {
+                    Some(MessageQueueOverflowHandling::Throttle) => (),
+                    Some(MessageQueueOverflowHandling::Drop) => return Ok(()),
+                    Some(MessageQueueOverflowHandling::ErrorAndDrop) => return Err(MessageQueueError::QueueFull),
+                    Some(MessageQueueOverflowHandling::ErrorAndForceExtend) => {
                         locked.queue.push_back((None, message));
                         return Err(MessageQueueError::QueueFull);
                     },
-                    MessageQueueOverflowHandling::Panic => panic!("MessageQueue full!")
+                    Some(MessageQueueOverflowHandling::Panic) => panic!("MessageQueue full!"),
+                    _ => panic!("Internal error, impossible case happened")
                 }
             }
             locked = self.0.wait_on_lock_notified(locked).unwrap();
@@ -408,15 +419,16 @@ impl<T> MessageQueueInternal<T>
                 locked.queue.push_back((Some(receipt_internal.clone()), message));
                 return Ok(SenderReceipt::new(receipt_internal));
             } else {
-                match locked.policy.0 {
-                    MessageQueueOverflowHandling::Throttle => (),
-                    MessageQueueOverflowHandling::Drop => return Err(MessageQueueError::Dropped),
-                    MessageQueueOverflowHandling::ErrorAndDrop => return Err(MessageQueueError::QueueFull),
-                    MessageQueueOverflowHandling::ErrorAndForceExtend => {
+                match locked.get_overflow_handling() {
+                    Some(MessageQueueOverflowHandling::Throttle) => (),
+                    Some(MessageQueueOverflowHandling::Drop) => return Err(MessageQueueError::Dropped),
+                    Some(MessageQueueOverflowHandling::ErrorAndDrop) => return Err(MessageQueueError::QueueFull),
+                    Some(MessageQueueOverflowHandling::ErrorAndForceExtend) => {
                         locked.queue.push_back((Some(receipt_internal.clone()), message));
                         return Err(MessageQueueError::QueueFull);
                     },
-                    MessageQueueOverflowHandling::Panic => panic!("MessageQueue full!")
+                    Some(MessageQueueOverflowHandling::Panic) => panic!("MessageQueue full!"),
+                    _ => panic!("Internal error, impossible case happened")
                 }
             }
             locked = self.0.wait_on_lock_notified(locked).unwrap();
