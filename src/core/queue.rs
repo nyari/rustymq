@@ -86,19 +86,19 @@ impl ReceiptState {
 struct ReceiptInternalData(pub Arc<ChgNtfMutex<ReceiptState>>);
 
 impl ReceiptInternalData {
-    pub fn queue() -> Self{ 
+    fn queue() -> Self{ 
         Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)))
     }
 
-    pub fn sender_receipt(&self) -> SenderReceipt {
+    fn sender_receipt(&self) -> SenderReceipt {
         SenderReceipt::new(self.clone())
     }
 
-    pub fn receiver_receipt(&self) -> ReceiverReceipt {
+    fn receiver_receipt(&self) -> ReceiverReceipt {
         ReceiverReceipt::new(self.clone())
     }
 
-    pub fn acnkowledged(self) {
+    fn acnkowledged(self) {
         self.0.lock_notify().unwrap().transition(ReceiptState::Acknowledged);
     }
 }
@@ -135,7 +135,7 @@ impl SenderReceipt {
         if let true = locked.has_been_received()? {
             Ok(*locked)
         } else {
-            locked = self.0.0.wait_on_locked(locked).unwrap();
+            locked = self.0.0.wait_timeout_on_locked(locked, timeout).unwrap().0;
             if let true = locked.deref().has_been_received()? {
                 Ok(*locked)
             } else {
@@ -159,7 +159,7 @@ impl SenderReceipt {
         if let true = locked.has_been_processed()? {
             Ok(*locked)
         } else {
-            locked = self.0.0.wait_on_locked(locked).unwrap();
+            locked = self.0.0.wait_timeout_on_locked(locked, timeout).unwrap().0;
             if let true = locked.deref().has_been_processed()? {
                 Ok(*locked)
             } else {
@@ -177,7 +177,7 @@ impl ReceiverReceipt {
         Self(internals)
     }
 
-    fn processed(self) {
+    pub fn processed(self) {
         self.0.0.lock_notify().unwrap().transition(ReceiptState::Processed);
     }
 }
@@ -253,7 +253,7 @@ impl<T> MessageQueueInternal<T>
         loop {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt.map(|x| ReceiverReceipt::new(x)), message))
+                    return Ok((receipt.map(|x| x.receiver_receipt()), message))
                 },
                 None => {
                     if !locked.has_sender() {
@@ -290,7 +290,7 @@ impl<T> MessageQueueInternal<T>
         for _ in 0..2 {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt.map(|x| ReceiverReceipt::new(x)), message))
+                    return Ok((receipt.map(|x| x.receiver_receipt()), message))
                 },
                 None => {
                     if !locked.has_sender() {
@@ -325,7 +325,7 @@ impl<T> MessageQueueInternal<T>
         let mut locked = self.0.lock_notify().unwrap();
         match locked.queue.pop_front() {
             Some((receipt, message)) => {
-                Ok(Some((receipt.map(|x| ReceiverReceipt::new(x)), message)))
+                Ok(Some((receipt.map(|x| x.receiver_receipt()), message)))
             },
             None => {
                 if !locked.has_sender() {
@@ -364,7 +364,7 @@ impl<T> MessageQueueInternal<T>
                                                              .drain(..)
                                                              .map(|(receipt, message)| {
                                                                   match receipt {
-                                                                      Some(r) => (Some(ReceiverReceipt::new(r)), message),
+                                                                      Some(r) => (Some(r.receiver_receipt()), message),
                                                                       None => (None, message)
                                                                   }
                                                              })
@@ -417,7 +417,7 @@ impl<T> MessageQueueInternal<T>
         loop {
             if !locked.is_queue_full() {
                 locked.queue.push_back((Some(receipt_internal.clone()), message));
-                return Ok(SenderReceipt::new(receipt_internal));
+                return Ok(receipt_internal.sender_receipt());
             } else {
                 match locked.get_overflow_handling() {
                     Some(MessageQueueOverflowHandling::Throttle) => (),
@@ -435,6 +435,92 @@ impl<T> MessageQueueInternal<T>
         }
     }
 }
+
+impl<T> Clone for MessageQueueInternal<T>
+    where T: Send + Sync {
+
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+
+#[derive(Clone)]
+pub struct MessageQueueReceiver<T>(MessageQueueInternal<T>) where T: Send + Sync;
+
+impl<T> MessageQueueReceiver<T>
+    where T: Send + Sync {
+    pub fn new(policy: MessageQueueingPolicy) -> Self {
+        Self(MessageQueueInternal::new(policy))
+    }
+
+    fn new_internals(internals: MessageQueueInternal<T>) -> Self {
+        Self(internals)
+    }
+
+    pub fn sender_pair(&self) -> MessageQueueSender<T> {
+        MessageQueueSender::new_internals(self.0.clone())
+    }
+
+    pub fn receive(&self) -> Result<T, MessageQueueError> {
+        self.0.receive()
+    }
+
+    pub fn receive_with_receipt(&self) -> Result<(Option<ReceiverReceipt>, T), MessageQueueError> {
+        self.0.receive_with_receipt()
+    }
+
+    pub fn receive_timeout(&self, timeout: Duration) -> Result<T, MessageQueueError> {
+        self.0.receive_timeout(timeout)
+    }
+
+    pub fn receive_timeout_with_receipt(&self, timeout: Duration) -> Result<(Option<ReceiverReceipt>, T), MessageQueueError> {
+        self.0.receive_timeout_with_receipt(timeout)
+    }
+
+    pub fn receive_async(&self) -> Result<Option<T>, MessageQueueError> {
+        self.0.receive_async()
+    }
+
+    pub fn receive_async_with_receipt(&self) -> Result<Option<(Option<ReceiverReceipt>, T)>, MessageQueueError> {
+        self.0.receive_async_with_receipt()
+    }
+
+    pub fn receive_all(&self) -> Result<Vec<T>, MessageQueueError> {
+        self.0.receive_all()
+    }
+
+    pub fn receive_all_with_receipt(&self) -> Result<Vec<(Option<ReceiverReceipt>, T)>, MessageQueueError> {
+        self.0.receive_all_with_receipt()
+    }
+}
+
+#[derive(Clone)]
+pub struct MessageQueueSender<T>(MessageQueueInternal<T>) where T: Send + Sync;
+
+impl<T> MessageQueueSender<T>
+    where T: Send + Sync {
+    pub fn new(policy: MessageQueueingPolicy) -> Self {
+        Self(MessageQueueInternal::new(policy))
+    }
+
+    fn new_internals(internals: MessageQueueInternal<T>) -> Self {
+        Self(internals)
+    }
+
+    pub fn receiver_pair(&self) -> MessageQueueReceiver<T> {
+        MessageQueueReceiver::new_internals(self.0.clone())
+    }
+
+    pub fn send(&self, message: T) -> Result<(), MessageQueueError> {
+        self.0.send(message)
+    }
+
+    pub fn send_with_receipt(&self, message: T) -> Result<SenderReceipt, MessageQueueError> {
+        self.0.send_with_receipt(message)
+    }
+}
+
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 pub type QueueingPolicy = (QueueOverflowHandling, usize);
