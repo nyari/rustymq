@@ -6,6 +6,7 @@ use core::message::{
 };
 use core::transport::TransportMethod;
 use core::queue::{MessageQueueError, ReceiptState};
+use core::util;
 
 use std::convert::{From, TryFrom};
 use std::ops::Deref;
@@ -430,7 +431,20 @@ where
     T: InwardSocket,
 {
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        self.lock_ref().receive(flags)
+        match flags {
+            OpFlag::Wait => {
+                util::thread::poll_mut(std::time::Duration::from_millis(1), || {
+                    match self.lock_ref().receive(OpFlag::NoWait) {
+                        Ok(message) => Some(Ok(message)),
+                        Err((_, SocketError::Timeout)) => None,
+                        Err(err) => Some(Err(err))
+                    }
+                })
+            },
+            OpFlag::NoWait => {
+                self.lock_ref().receive(flags)
+            }
+        }
     }
 }
 
@@ -441,9 +455,9 @@ where
     fn send(
         &mut self,
         message: RawMessage,
-        _flags: OpFlag,
+        flags: OpFlag,
     ) -> Result<MessageMetadata, SocketError> {
-        self.lock_ref().send(message, OpFlag::NoWait)
+        self.lock_ref().send(message, flags)
     }
 }
 

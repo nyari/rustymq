@@ -113,6 +113,7 @@ impl RawMessageReader {
             }
             Err(err) => match err.kind() {
                 std::io::ErrorKind::WouldBlock => Ok(()),
+                std::io::ErrorKind::Interrupted => Ok(()),
                 _ => Err(State::from(err)),
             },
         }
