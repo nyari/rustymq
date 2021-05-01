@@ -91,7 +91,7 @@ impl ReceiptState {
             _ => Err(())
         };
 
-        *self = new_state.expect("Invalid ReceiptState transition");
+        *self = new_state.expect(format!("Invalid ReceiptState transition. From: {:?}, To: {:?}", self, state).as_str());
     }
 }
 
@@ -99,20 +99,9 @@ impl ReceiptState {
 struct ReceiptInternalData(pub Arc<ChgNtfMutex<ReceiptState>>);
 
 impl ReceiptInternalData {
-    fn queue() -> Self{ 
-        Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)))
-    }
-
-    fn sender_receipt(&self) -> SenderReceipt {
-        SenderReceipt::new(self.clone())
-    }
-
-    fn receiver_receipt(&self) -> ReceiverReceipt {
-        ReceiverReceipt::new(self.clone())
-    }
-
-    fn acnkowledged(self) {
-        self.0.lock_notify().unwrap().transition(ReceiptState::Acknowledged);
+    fn queue() -> (SenderReceipt, ReceiverReceipt) { 
+        let internals = Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)));
+        (SenderReceipt::new(internals.clone()), ReceiverReceipt::new(internals))
     }
 }
 
@@ -190,6 +179,10 @@ impl ReceiverReceipt {
         Self(internals)
     }
 
+    pub fn acnkowledged(self) {
+        self.0.0.lock_notify().unwrap().transition(ReceiptState::Acknowledged);
+    }
+
     pub fn processed(self) {
         self.0.0.lock_notify().unwrap().transition(ReceiptState::Processed);
     }
@@ -259,7 +252,7 @@ impl MessageQueueCounter {
 
 struct MessageQueueInternalData<T> 
     where T: Send + Sync {
-    pub queue: VecDeque<(Option<ReceiptInternalData>, T)>,
+    pub queue: VecDeque<(Option<ReceiverReceipt>, T)>,
     pub counters: MessageQueueCounter,
     pub policy: MessageQueueingPolicy
 }
@@ -326,7 +319,7 @@ impl<T> MessageQueueInternal<T>
         loop {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt.map(|x| x.receiver_receipt()), message))
+                    return Ok((receipt, message))
                 },
                 None => {
                     if locked.senders_all_dropped() {
@@ -363,7 +356,7 @@ impl<T> MessageQueueInternal<T>
         for _ in 0..2 {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt.map(|x| x.receiver_receipt()), message))
+                    return Ok((receipt, message))
                 },
                 None => {
                     if locked.senders_all_dropped() {
@@ -398,7 +391,7 @@ impl<T> MessageQueueInternal<T>
         let mut locked = self.0.lock_notify().unwrap();
         match locked.queue.pop_front() {
             Some((receipt, message)) => {
-                Ok(Some((receipt.map(|x| x.receiver_receipt()), message)))
+                Ok(Some((receipt, message)))
             },
             None => {
                 if locked.senders_all_dropped() {
@@ -437,7 +430,7 @@ impl<T> MessageQueueInternal<T>
                                                              .drain(..)
                                                              .map(|(receipt, message)| {
                                                                   match receipt {
-                                                                      Some(r) => (Some(r.receiver_receipt()), message),
+                                                                      Some(r) => (Some(r), message),
                                                                       None => (None, message)
                                                                   }
                                                              })
@@ -482,22 +475,22 @@ impl<T> MessageQueueInternal<T>
     fn send_with_receipt(&self, message: T) -> Result<SenderReceipt, MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
 
-        let receipt_internal = ReceiptInternalData::queue();
+        let (sender_receipt, receiver_receipt) = ReceiptInternalData::queue();
         loop {
             if locked.receivers_all_dropped() {
                 return Err(MessageQueueError::ReceiversAllDropped)
             }
 
             if !locked.is_queue_full() {
-                locked.queue.push_back((Some(receipt_internal.clone()), message));
-                return Ok(receipt_internal.sender_receipt());
+                locked.queue.push_back((Some(receiver_receipt), message));
+                return Ok(sender_receipt);
             } else {
                 match locked.get_overflow_handling() {
                     Some(MessageQueueOverflowHandling::Throttle) => (),
                     Some(MessageQueueOverflowHandling::Drop) => return Err(MessageQueueError::Dropped),
                     Some(MessageQueueOverflowHandling::ErrorAndDrop) => return Err(MessageQueueError::QueueFull),
                     Some(MessageQueueOverflowHandling::ErrorAndForceExtend) => {
-                        locked.queue.push_back((Some(receipt_internal.clone()), message));
+                        locked.queue.push_back((Some(receiver_receipt), message));
                         return Err(MessageQueueError::QueueFull);
                     },
                     Some(MessageQueueOverflowHandling::Panic) => panic!("MessageQueue full!"),
