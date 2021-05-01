@@ -55,7 +55,7 @@ impl RawMessageReader {
             | Err(serializer::Error::ByteOrderMarkError) => {
                 Err(SocketInternalError::UnknownDataFormatReceived)
             }
-            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::UnknownInternalError),
+            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::UnknownInternalError("Could not parse incoming message from stream".to_string())),
             _ => panic!("Any other case should already have been handled"),
         }
     }
@@ -78,7 +78,7 @@ impl RawMessageReader {
                         Ok(outputs)
                     }
                 }
-                SocketInternalError::UnknownInternalError => panic!("Internal error"),
+                SocketInternalError::UnknownInternalError(message) => panic!("{}", message),
                 other => Err(State::from(other)),
             }
         } else {

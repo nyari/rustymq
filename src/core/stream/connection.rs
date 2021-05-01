@@ -1,5 +1,5 @@
 use core::message::{Message, RawMessage, PeerId};
-use core::queue::{MessageQueueSender, MessageQueueReceiver};
+use core::queue::{MessageQueueSender, MessageQueueReceiver, SenderReceipt};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::util::thread::{Semaphore, Sleeper};
@@ -99,7 +99,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
                 }
             }
             Err(stream::State::Stream(err)) => Err(err),
-            Err(stream::State::Remainder) => panic!("Internal error"),
+            Err(stream::State::Remainder) => Err(SocketInternalError::UnknownInternalError("Unknown error while writing into Stream".to_string())),
         }
     }
 
@@ -202,9 +202,9 @@ impl ReadWriteStreamConnectionThreadManager {
         } else {
             if self.stop_semaphore.is_signaled() {
                 let result = match self.worker_thread.take().unwrap().join() {
-                    Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
+                    Ok(Ok(())) => Err(SocketInternalError::UnknownInternalError("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore".to_string())),
                     Ok(error) => error,
-                    Err(_) => Err(SocketInternalError::UnknownInternalError)
+                    Err(_) => Err(SocketInternalError::UnknownInternalError("Worker thread of socket has panicked or stopped unexpectedly".to_string()))
                 };
                 self.last_error = Some(result.clone());
                 result
@@ -220,10 +220,9 @@ impl ReadWriteStreamConnectionThreadManager {
         Ok(())
     }
 
-    pub fn send(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send(&mut self, message: RawMessage) -> Result<SenderReceipt, SocketInternalError> {
         self.check_worker_state()?;
-        self.outward_queue.send_with_receipt(message)?.wait_processed()?;
-        Ok(())
+        Ok(self.outward_queue.send_with_receipt(message)?)
     }
 
     pub fn receive_async(&mut self) -> Option<RawMessage> {

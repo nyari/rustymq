@@ -10,6 +10,7 @@ use core::queue::{MessageQueueError, ReceiptState};
 use std::convert::{From, TryFrom};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::string::String;
 
 /// # Operation flags
 /// Configuration for individual send and receive calls on [`InwardSocket`]s and [`OutwardSocket`]s
@@ -91,7 +92,7 @@ pub enum SocketInternalError {
     CouldNotConnect,
 
     IncompleteData,
-    UnknownInternalError,
+    UnknownInternalError(String),
     UnknownDataFormatReceived,
 }
 
@@ -112,7 +113,7 @@ impl From<MessageQueueError> for SocketInternalError {
         match input {
             MessageQueueError::ReceiversAllDropped | MessageQueueError::SendersAllDropped => SocketInternalError::Disconnected,
             MessageQueueError::QueueFull => SocketInternalError::QueueDepthReached,
-            _ => panic!("Internal error, {:?} cannot be converted to SocketInternalError", input)
+            _ => SocketInternalError::UnknownInternalError(format!("Could not convert to SocketInternalError: {:?}", input))
         }
     }
 }
@@ -121,7 +122,7 @@ impl From<ReceiptState> for SocketInternalError {
     fn from(input: ReceiptState) -> SocketInternalError {
         match input {
             ReceiptState::Dropped => SocketInternalError::Disconnected,
-            _ => panic!("Internal error, {:?} cannot be converted to SocketInternalError", input)
+            _ => SocketInternalError::UnknownInternalError(format!("Could not convert to SocketInternalError: {:?}", input))
         }
     }
 }
