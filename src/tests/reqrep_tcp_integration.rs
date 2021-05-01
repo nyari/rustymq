@@ -15,12 +15,14 @@ fn simple_req_rep_tcp_test() {
     let mut requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
-        ));
+        ))
+        .unwrap();
     let mut replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),
-        ));
+        ))
+        .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(
@@ -59,12 +61,14 @@ fn stress_simple_req_rep_tcp_test() {
     let mut requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
-        ));
+        ))
+        .unwrap();
     let mut replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),
-        ));
+        ))
+        .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(
@@ -131,12 +135,14 @@ fn simple_req_rep_tcp_test_disconnected_before_first_send() {
     let mut requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
-        ));
+        ))
+        .unwrap();
     let mut replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),
-        ));
+        ))
+        .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(

@@ -1,8 +1,9 @@
 //! # Internal helper module for network connections
 //! This module contains functionality to establish stream based connectons through network
 
+use core::config::TransportConfiguration;
 use core::message::{Message, PeerId, RawMessage};
-use core::queue::{InwardMessageQueue, InwardMessageQueuePeerSide};
+use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, ReceiptState};
 use core::socket::{OpFlag, PeerIdentification, SocketError, SocketInternalError};
 use core::stream;
 use core::transport::{
@@ -21,6 +22,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use crate::core::util;
 
 fn query_acceptor_thread_default_duration_backoff(
 ) -> DurationBackoffWithDebounce<LinearDurationBackoff> {
@@ -54,55 +57,82 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
 
     fn connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
-        inward_queue: InwardMessageQueuePeerSide,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn accept_connection(
         &self,
+        config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
-        inward_queue: InwardMessageQueuePeerSide,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn manager_connect(
         &self,
+        config: &TransportConfiguration,
         addr: NetworkAddress,
-        inward_queue: InwardMessageQueuePeerSide,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
-        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(
-            self.connect(addr, inward_queue)?,
-        )
+        stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.connect(
+            config,
+            addr,
+            peer_id,
+            inward_queue,
+        )?)
     }
 
     fn manager_accept_connection(
         &self,
+        config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
-        inward_queue: InwardMessageQueuePeerSide,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.accept_connection(
+            config,
             stream,
             addr,
+            peer_id,
             inward_queue,
         )?)
     }
 }
 
+struct NetworkConnectionPeerManagerTables {
+    pub peer_thread: HashMap<PeerId, stream::ReadWriteStreamConnectionThreadManager>,
+    pub addresses: HashMap<SocketAddr, PeerId>,
+    pub peers: HashMap<PeerId, SocketAddr>,
+}
+
+impl NetworkConnectionPeerManagerTables {
+    pub fn new() -> Self {
+        Self {
+            peer_thread: HashMap::new(),
+            addresses: HashMap::new(),
+            peers: HashMap::new(),
+        }
+    }
+}
+
 pub struct NetworkConnectionPeerManager {
-    peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionThreadManager>,
-    addresses: HashMap<SocketAddr, PeerId>,
-    peers: HashMap<PeerId, SocketAddr>,
-    inward_queue: InwardMessageQueue,
+    tables: Mutex<NetworkConnectionPeerManagerTables>,
+    inward_queue: MessageQueueReceiver<RawMessage>,
+    config: TransportConfiguration,
 }
 
 impl NetworkConnectionPeerManager {
-    pub fn new(inward_queue: InwardMessageQueue) -> Self {
+    pub fn new(config: TransportConfiguration) -> Self {
         Self {
-            peer_table: HashMap::new(),
-            addresses: HashMap::new(),
-            peers: HashMap::new(),
-            inward_queue: inward_queue,
+            tables: Mutex::new(NetworkConnectionPeerManagerTables::new()),
+            inward_queue: MessageQueueReceiver::new(config.clone().queue_policy),
+            config: config,
         }
     }
 
@@ -110,7 +140,7 @@ impl NetworkConnectionPeerManager {
         Stream: NetworkStream,
         Builder: NetworkStreamConnectionBuilder<Stream = Stream>,
     >(
-        &mut self,
+        &self,
         builder: Builder,
         address: NetworkAddress,
     ) -> Result<PeerId, SocketInternalError> {
@@ -125,15 +155,17 @@ impl NetworkConnectionPeerManager {
         Stream: NetworkStream,
         Builder: NetworkStreamConnectionBuilder<Stream = Stream>,
     >(
-        &mut self,
+        &self,
         builder: Builder,
         (stream, addr): (Stream, NetworkAddress),
     ) -> Result<PeerId, SocketInternalError> {
         let peer_id = PeerId::new_random();
         match builder.manager_accept_connection(
+            &self.config,
             stream,
             addr.clone(),
-            self.inward_queue.create_peer_side_queue(peer_id.clone()),
+            peer_id.clone(),
+            self.inward_queue.sender_pair(),
         ) {
             Ok(connection) => {
                 self.commit_onnection(connection, addr.get_address(), peer_id.clone());
@@ -144,28 +176,73 @@ impl NetworkConnectionPeerManager {
     }
 
     pub fn send_message(
-        &mut self,
+        &self,
         message: RawMessage,
         flags: OpFlag,
     ) -> Result<(), SocketInternalError> {
-        let connection = self.get_message_peer_connection(message.peer_id())?;
+        self.handle_peer_error(&message.peer_id().unwrap())?;
         match flags {
-            OpFlag::Wait => connection.send(message),
-            OpFlag::NoWait => connection.send_async(message),
+            OpFlag::Wait => {
+                let receipt;
+                {
+                    let mut tables = self.tables.lock().unwrap();
+                    let connection = Self::get_message_peer_connection(
+                        &mut tables.peer_thread,
+                        message.peer_id(),
+                    )?;
+                    receipt = connection.send(message)?;
+                }
+                match receipt.wait_processed() {
+                    Ok(_) => Ok(()),
+                    Err(ReceiptState::Dropped) => Err(SocketInternalError::Disconnected),
+                    Err(_) => Err(SocketInternalError::UnknownInternalError(
+                        "Sent message has not been processed.".to_string(),
+                    )),
+                }
+            }
+            OpFlag::NoWait => {
+                let mut tables = self.tables.lock().unwrap();
+                let connection =
+                    Self::get_message_peer_connection(&mut tables.peer_thread, message.peer_id())?;
+                connection.send_async(message)
+            }
         }
     }
 
-    pub fn handle_next_error(&mut self) -> Result<(), (Option<PeerId>, SocketInternalError)> {
-        let lost_peer = self
-            .peer_table
-            .iter_mut()
-            .find_map(|(peer_id, connection)| {
-                if let Err(err) = connection.check_worker_state() {
-                    Some((peer_id.clone(), err))
-                } else {
-                    None
-                }
-            });
+    fn handle_peer_error(&self, peer_id: &PeerId) -> Result<(), SocketInternalError> {
+        let result = {
+            let mut tables = self.tables.lock().unwrap();
+            let peer = tables
+                .peer_thread
+                .get_mut(peer_id)
+                .ok_or(SocketInternalError::UnknownPeer)?;
+            peer.check_worker_state()
+        };
+
+        match result {
+            Err(err) => {
+                self.close_connection(PeerIdentification::PeerId(peer_id.clone()))
+                    .unwrap();
+                Err(err)
+            }
+            Ok(_) => Ok(()),
+        }
+    }
+
+    fn handle_next_error(&self) -> Result<(), (Option<PeerId>, SocketInternalError)> {
+        let lost_peer =
+            self.tables
+                .lock()
+                .unwrap()
+                .peer_thread
+                .iter_mut()
+                .find_map(|(peer_id, connection)| {
+                    if let Err(err) = connection.check_worker_state() {
+                        Some((peer_id.clone(), err))
+                    } else {
+                        None
+                    }
+                });
 
         match lost_peer {
             Some((peer_id, err)) => {
@@ -177,31 +254,59 @@ impl NetworkConnectionPeerManager {
         }
     }
 
+    pub fn receive_message(
+        &self,
+        flags: OpFlag,
+    ) -> Result<RawMessage, (Option<PeerId>, SocketInternalError)> {
+        self.handle_next_error()?;
+        match flags {
+            OpFlag::Wait => match self.inward_queue.receive() {
+                Ok(message) => Ok(message),
+                Err(MessageQueueError::SendersAllDropped) => loop {
+                    let () = self.handle_next_error()?;
+                    util::thread::sleep(std::time::Duration::from_secs(1));
+                },
+                _ => panic!("Unqueueing resulted in unhandleable error"),
+            },
+            OpFlag::NoWait => match self.inward_queue.receive_async() {
+                Ok(Some(message)) => Ok(message),
+                Ok(None) => Err((None, SocketInternalError::Timeout)),
+                Err(MessageQueueError::SendersAllDropped) => {
+                    self.handle_next_error()?;
+                    Err((None, SocketInternalError::Timeout))
+                }
+                _ => panic!("Unqueueing resulted in unhandleable error"),
+            },
+        }
+    }
+
     pub fn query_connected_peers(&self) -> HashSet<PeerId> {
-        HashSet::from_iter(self.peer_table.keys().map(|x| x.clone()))
+        let tables = self.tables.lock().unwrap();
+        HashSet::from_iter(tables.peer_thread.keys().map(|x| x.clone()))
     }
 
     pub fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketInternalError> {
+        let mut tables = self.tables.lock().unwrap();
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
-                self.peer_table
+                tables
+                    .peer_thread
                     .remove(&peer_id)
                     .ok_or(SocketInternalError::UnknownPeer)?;
-                self.addresses
-                    .remove(&self.peers.remove(&peer_id).unwrap())
-                    .unwrap();
+                let address = tables.peers.remove(&peer_id).unwrap();
+                tables.addresses.remove(&address).unwrap();
                 Ok(None)
             }
             PeerIdentification::TransportMethod(TransportMethod::Network(addr)) => {
-                let peer_id = self
+                let peer_id = tables
                     .addresses
                     .remove(&addr.get_address())
                     .ok_or(SocketInternalError::UnknownPeer)?;
-                self.peers.remove(&peer_id).unwrap();
-                self.peer_table.remove(&peer_id).unwrap();
+                tables.peers.remove(&peer_id).unwrap();
+                tables.peer_thread.remove(&peer_id).unwrap();
                 Ok(Some(peer_id))
             }
             _ => Err(SocketInternalError::UnknownPeer),
@@ -209,17 +314,17 @@ impl NetworkConnectionPeerManager {
     }
 
     fn get_message_peer_connection<'a>(
-        &'a mut self,
+        table: &'a mut HashMap<PeerId, stream::ReadWriteStreamConnectionThreadManager>,
         peer_id: &Option<PeerId>,
     ) -> Result<&'a mut stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         match peer_id {
-            Some(peerid) => match self.peer_table.get_mut(&peerid) {
+            Some(peerid) => match table.get_mut(&peerid) {
                 Some(connection) => Ok(connection),
                 None => Err(SocketInternalError::UnknownPeer),
             },
             None => {
-                if self.peer_table.len() == 1 {
-                    Ok(self.peer_table.values_mut().next().unwrap())
+                if table.len() == 1 {
+                    Ok(table.values_mut().next().unwrap())
                 } else {
                     Err(SocketInternalError::UnknownPeer)
                 }
@@ -231,15 +336,17 @@ impl NetworkConnectionPeerManager {
         Stream: NetworkStream,
         Builder: NetworkStreamConnectionBuilder<Stream = Stream>,
     >(
-        &mut self,
+        &self,
         builder: Builder,
         address: NetworkAddress,
     ) -> Result<PeerId, SocketInternalError> {
         let peer_id = PeerId::new_random();
 
         match builder.manager_connect(
+            &self.config,
             address.clone(),
-            self.inward_queue.create_peer_side_queue(peer_id.clone()),
+            peer_id.clone(),
+            self.inward_queue.sender_pair(),
         ) {
             Ok(connection) => {
                 Ok(self.commit_onnection(connection, address.get_address(), peer_id.clone()))
@@ -251,38 +358,37 @@ impl NetworkConnectionPeerManager {
     }
 
     fn commit_onnection(
-        &mut self,
+        &self,
         connection: stream::ReadWriteStreamConnectionThreadManager,
         addr: SocketAddr,
         peer_id: PeerId,
     ) {
-        self.peer_table.insert(peer_id, connection);
-        self.addresses.insert(addr, peer_id);
-        self.peers.insert(peer_id, addr);
+        let mut tables = self.tables.lock().unwrap();
+        tables.peer_thread.insert(peer_id, connection);
+        tables.addresses.insert(addr, peer_id);
+        tables.peers.insert(peer_id, addr);
     }
 
     fn is_already_connected(&self, address: &SocketAddr) -> bool {
-        self.addresses.contains_key(address)
+        let tables = self.tables.lock().unwrap();
+        tables.addresses.contains_key(address)
     }
 }
 
 struct NetworkConnectionManager {
-    peers: Arc<Mutex<NetworkConnectionPeerManager>>,
-    inward_queue: InwardMessageQueue,
+    peers: Arc<NetworkConnectionPeerManager>,
+    config: TransportConfiguration,
 }
 
 impl NetworkConnectionManager {
-    pub fn new() -> Self {
-        let inward_queue = InwardMessageQueue::new();
+    pub fn new(config: TransportConfiguration) -> Self {
         Self {
-            peers: Arc::new(Mutex::new(NetworkConnectionPeerManager::new(
-                inward_queue.clone(),
-            ))),
-            inward_queue: inward_queue,
+            peers: Arc::new(NetworkConnectionPeerManager::new(config.clone())),
+            config,
         }
     }
 
-    pub fn get_peers(&self) -> Arc<Mutex<NetworkConnectionPeerManager>> {
+    pub fn get_peers(&self) -> Arc<NetworkConnectionPeerManager> {
         self.peers.clone()
     }
 
@@ -294,8 +400,7 @@ impl NetworkConnectionManager {
         builder: Builder,
         address: NetworkAddress,
     ) -> Result<PeerId, SocketInternalError> {
-        let mut peers = self.peers.lock().unwrap();
-        peers.connect(builder, address)
+        self.peers.connect(builder, address)
     }
 
     pub fn send_message(
@@ -303,24 +408,21 @@ impl NetworkConnectionManager {
         message: RawMessage,
         flags: OpFlag,
     ) -> Result<(), SocketInternalError> {
-        let mut peers = self.peers.lock().unwrap();
-        peers.send_message(message, flags)
+        self.peers.send_message(message, flags)
+    }
+
+    pub fn receive_message(
+        &mut self,
+        flags: OpFlag,
+    ) -> Result<RawMessage, (Option<PeerId>, SocketInternalError)> {
+        self.peers.receive_message(flags)
     }
 
     fn close_connection_internal(
         &mut self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketInternalError> {
-        let mut peers = self.peers.lock().unwrap();
-        peers.close_connection(peer_identification)
-    }
-
-    fn handle_next_error(&mut self) -> Result<(), (Option<PeerId>, SocketError)> {
-        self.peers
-            .lock()
-            .unwrap()
-            .handle_next_error()
-            .map_err(|(peer_id, err)| (peer_id, SocketInternalError::externalize_error(err)))
+        self.peers.close_connection(peer_identification)
     }
 }
 
@@ -330,27 +432,12 @@ impl Transport for NetworkConnectionManager {
     }
 
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        self.handle_next_error()?;
-        match flags {
-            OpFlag::Wait => loop {
-                match self
-                    .inward_queue
-                    .receive_one_timeout(Duration::from_secs(1))
-                {
-                    Some(message) => break Ok(message),
-                    None => self.handle_next_error()?,
-                }
-            },
-            OpFlag::NoWait => self
-                .inward_queue
-                .receive_async_one()
-                .ok_or((None, SocketError::Timeout)),
-        }
+        self.receive_message(flags)
+            .map_err(|(peer, err)| (peer, SocketInternalError::externalize_error(err)))
     }
 
     fn query_connected_peers(&self) -> HashSet<PeerId> {
-        let peers = self.peers.lock().unwrap();
-        peers.query_connected_peers()
+        self.peers.query_connected_peers()
     }
 
     fn close_connection(
@@ -358,6 +445,10 @@ impl Transport for NetworkConnectionManager {
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketError> {
         SocketInternalError::externalize_result(self.close_connection_internal(peer_identification))
+    }
+
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        Some(&self.config)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -368,13 +459,24 @@ impl Transport for NetworkConnectionManager {
 pub struct NetworkInitiatorTransport<Builder: NetworkStreamConnectionBuilder> {
     manager: NetworkConnectionManager,
     builder: Builder,
+    config: TransportConfiguration,
 }
 
 impl<Builder: NetworkStreamConnectionBuilder> NetworkInitiatorTransport<Builder> {
     pub fn new(builder: Builder) -> Self {
+        let config = TransportConfiguration::new();
         Self {
-            manager: NetworkConnectionManager::new(),
+            manager: NetworkConnectionManager::new(config.clone()),
             builder: builder,
+            config: config,
+        }
+    }
+
+    pub fn with_configuration(builder: Builder, config: TransportConfiguration) -> Self {
+        Self {
+            manager: NetworkConnectionManager::new(config.clone()),
+            builder: builder,
+            config: config,
         }
     }
 }
@@ -399,6 +501,10 @@ impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTran
         self.manager.query_connected_peers()
     }
 
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        Some(&self.config)
+    }
+
     fn close(self) -> Result<(), SocketError> {
         self.manager.close()
     }
@@ -421,7 +527,7 @@ pub struct NetworkConnectionListener<
     Listener: NetworkListener,
     ConnectionBuilder: NetworkStreamConnectionBuilder<Stream = Listener::Stream>,
 > {
-    manager: Arc<Mutex<NetworkConnectionPeerManager>>,
+    manager: Arc<NetworkConnectionPeerManager>,
     listener: Listener,
     connection_builder: ConnectionBuilder,
 }
@@ -435,7 +541,7 @@ impl<
         connection_builder: ConnectionBuilder,
         listener_builder: ListenerBuilder,
         addr: NetworkAddress,
-        manager: Arc<Mutex<NetworkConnectionPeerManager>>,
+        manager: Arc<NetworkConnectionPeerManager>,
     ) -> Result<Self, SocketInternalError> {
         Ok(Self {
             manager: manager,
@@ -450,8 +556,7 @@ impl<
             loop {
                 match self.listener.accept() {
                     Ok((stream, incoming_addr)) => {
-                        let mut manager = self.manager.lock().unwrap();
-                        manager
+                        self.manager
                             .accept_connection(
                                 self.connection_builder.clone(),
                                 (stream, NetworkAddress::from_socket_addr(incoming_addr)),
@@ -488,6 +593,7 @@ where
     stop_semaphore: Semaphore,
     listener_builder: ListenerBuilder,
     connection_builder: ConnectionBuilder,
+    config: TransportConfiguration,
     _listener: PhantomData<Listener>,
 }
 
@@ -501,11 +607,29 @@ where
     pub fn new(connection_builder: ConnectionBuilder, listener_builder: ListenerBuilder) -> Self {
         let stop_semaphore = Semaphore::new();
         Self {
-            manager: NetworkConnectionManager::new(),
+            manager: NetworkConnectionManager::new(TransportConfiguration::new()),
             listener_thread: None,
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,
             connection_builder: connection_builder,
+            config: TransportConfiguration::new(),
+            _listener: PhantomData,
+        }
+    }
+
+    pub fn with_configuration(
+        connection_builder: ConnectionBuilder,
+        listener_builder: ListenerBuilder,
+        config: TransportConfiguration,
+    ) -> Self {
+        let stop_semaphore = Semaphore::new();
+        Self {
+            manager: NetworkConnectionManager::new(config.clone()),
+            listener_thread: None,
+            stop_semaphore: stop_semaphore,
+            listener_builder: listener_builder,
+            connection_builder: connection_builder,
+            config: config,
             _listener: PhantomData,
         }
     }
@@ -535,6 +659,10 @@ where
 
     fn query_connected_peers(&self) -> HashSet<PeerId> {
         self.manager.query_connected_peers()
+    }
+
+    fn query_configuration(&self) -> Option<&TransportConfiguration> {
+        Some(&self.config)
     }
 
     fn close(self) -> Result<(), SocketError> {

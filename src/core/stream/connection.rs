@@ -1,10 +1,11 @@
-use core::message::RawMessage;
-use core::queue::{InwardMessageQueuePeerSide, OutwardMessageQueue};
+use core::message::{Message, PeerId, RawMessage};
+use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, SenderReceipt};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
+use std::collections::VecDeque;
 use std::io;
 use std::thread;
 use std::time::Duration;
@@ -40,16 +41,19 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     stream: S,
     reader: stream::RawMessageReader,
     writer: stream::RawMessageWriter,
-    outward_queue: OutwardMessageQueue,
-    inward_queue: InwardMessageQueuePeerSide,
+    outward_queue: MessageQueueReceiver<RawMessage>,
+    inward_queue: MessageQueueSender<RawMessage>,
+    peer_id: PeerId,
+    last_received: VecDeque<RawMessage>,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     /// Creates an instance for a stream object and an inward queue
     pub fn new(
         stream: S,
-        outward_queue: OutwardMessageQueue,
-        inward_queue: InwardMessageQueuePeerSide,
+        outward_queue: MessageQueueReceiver<RawMessage>,
+        inward_queue: MessageQueueSender<RawMessage>,
+        peer_id: PeerId,
     ) -> Self {
         Self {
             stream: stream,
@@ -57,12 +61,19 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             writer: stream::RawMessageWriter::new_empty(),
             outward_queue: outward_queue,
             inward_queue: inward_queue,
+            peer_id: peer_id,
+            last_received: VecDeque::new(),
         }
     }
 
     /// Get a copy if the outward queue to post messages to
-    pub fn get_outward_queue(&self) -> OutwardMessageQueue {
-        self.outward_queue.clone()
+    pub fn get_outward_queue(&self) -> MessageQueueSender<RawMessage> {
+        self.outward_queue.sender_pair()
+    }
+
+    /// Get a copy if the outward queue to post messages to
+    pub fn get_inward_queue(&self) -> MessageQueueReceiver<RawMessage> {
+        self.inward_queue.receiver_pair()
     }
 
     /// Read next chunk from the input stream into [`stream::RawMessageReader`]
@@ -84,30 +95,29 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         match self.proceed_sending() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Empty) => {
-                if let Err(stream::State::Empty) = self.dequeue_next_outgoing_message_tro_writer() {
+                if let Err(stream::State::Empty) = self.dequeue_next_outgoing_message_to_writer() {
                     Ok(ReadWriteStremConnectionState::Free)
                 } else {
                     Ok(ReadWriteStremConnectionState::Busy)
                 }
             }
             Err(stream::State::Stream(err)) => Err(err),
-            Err(stream::State::Remainder) => panic!("Internal error"),
+            Err(stream::State::Remainder) => Err(SocketInternalError::UnknownInternalError(
+                "Unknown error while writing into Stream".to_string(),
+            )),
         }
     }
 
     /// Take message from output queue and add it to [`stream::RawMessageWriter`]
-    fn dequeue_next_outgoing_message_tro_writer(&mut self) -> Result<(), stream::State> {
-        match self.outward_queue.pop_outward_queue() {
-            Some((message, Some(semaphore))) => Ok(self.writer =
-                stream::RawMessageWriter::new_with_semaphore(
-                    message,
-                    BUFFER_BATCH_SIZE,
-                    semaphore,
-                )),
-            Some((message, None)) => {
+    fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
+        match self.outward_queue.receive_async_with_receipt() {
+            Ok(Some((Some(receipt), message))) => Ok(self.writer =
+                stream::RawMessageWriter::new_with_receipt(message, BUFFER_BATCH_SIZE, receipt)),
+            Ok(Some((None, message))) => {
                 Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
             }
-            None => Err(stream::State::Empty),
+            Ok(None) => Err(stream::State::Empty),
+            Err(err) => Err(stream::State::Stream(err.into())),
         }
     }
 
@@ -118,10 +128,28 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
 
     /// Handle reading a chunk of data from [`io::Read`] with [`stream::RawMessageReader`]
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
-        let messages = self.reader.read_into(&mut self.stream)?;
-        if !messages.is_empty() {
-            self.inward_queue
-                .extend_to_inward_queue(messages.into_iter());
+        if self.last_received.is_empty() {
+            let messages = self.reader.read_into(&mut self.stream)?;
+            let peer_id = self.peer_id.clone();
+            self.last_received
+                .extend(messages.into_iter().map(|msg| msg.apply_peer_id(peer_id)));
+        }
+
+        while !self.last_received.is_empty() {
+            match self
+                .inward_queue
+                .send_unless_full(self.last_received.pop_front().unwrap())
+            {
+                Ok(_) => (),
+                Err((MessageQueueError::QueueFull, message)) => {
+                    self.last_received.push_front(message);
+                    return Ok(());
+                }
+                Err((err, message)) => {
+                    self.last_received.push_front(message);
+                    return Err(stream::State::Stream(err.into()));
+                }
+            }
         }
         Ok(())
     }
@@ -161,7 +189,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 }
 
 pub struct ReadWriteStreamConnectionThreadManager {
-    outward_queue: OutwardMessageQueue,
+    outward_queue: MessageQueueSender<RawMessage>,
+    inward_queue: MessageQueueReceiver<RawMessage>,
     worker_thread: Option<std::thread::JoinHandle<Result<(), SocketInternalError>>>,
     last_error: Option<Result<(), SocketInternalError>>,
     stop_semaphore: Semaphore,
@@ -172,11 +201,13 @@ impl ReadWriteStreamConnectionThreadManager {
         stream: ReadWriteStreamConnection<S>,
     ) -> Result<Self, SocketInternalError> {
         let outward_queue = stream.get_outward_queue();
+        let inward_queue = stream.get_inward_queue();
         let worker = ReadWriteStreamConnectionWorker::construct_from_stream(stream)?;
         let stop_semaphore = Semaphore::new();
         let stop_semaphore_clone = stop_semaphore.clone();
         Ok(Self {
             outward_queue: outward_queue,
+            inward_queue: inward_queue,
             worker_thread: Some(thread::spawn(move || {
                 worker.main_loop(stop_semaphore.clone())
             })),
@@ -191,9 +222,9 @@ impl ReadWriteStreamConnectionThreadManager {
         } else {
             if self.stop_semaphore.is_signaled() {
                 let result = match self.worker_thread.take().unwrap().join() {
-                    Ok(Ok(())) => panic!("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore"),
+                    Ok(Ok(())) => Err(SocketInternalError::UnknownInternalError("A worker should not exit without an error condition except when it is explicitly stopped by the semaphore".to_string())),
                     Ok(error) => error,
-                    Err(_) => Err(SocketInternalError::UnknownInternalError)
+                    Err(_) => Err(SocketInternalError::UnknownInternalError("Worker thread of socket has panicked or stopped unexpectedly".to_string()))
                 };
                 self.last_error = Some(result.clone());
                 result
@@ -205,23 +236,25 @@ impl ReadWriteStreamConnectionThreadManager {
 
     pub fn send_async(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
         self.check_worker_state()?;
-        self.outward_queue.add_to_outward_queue(message);
+        self.outward_queue.send(message)?;
         Ok(())
     }
 
-    pub fn send(&mut self, message: RawMessage) -> Result<(), SocketInternalError> {
+    pub fn send(&mut self, message: RawMessage) -> Result<SenderReceipt, SocketInternalError> {
         self.check_worker_state()?;
-        let completion_semaphore = self.outward_queue.add_to_prio_outward_queue(message);
-        loop {
-            let (done_flag, _timeout_guard) = completion_semaphore
-                .wait_timeout(std::time::Duration::from_secs(1))
-                .unwrap();
-            if *done_flag {
-                return Ok(());
-            } else if let Err(err) = self.check_worker_state() {
-                return Err(err);
-            }
-        }
+        Ok(self.outward_queue.send_with_receipt(message)?)
+    }
+
+    pub fn receive_async(&mut self) -> Option<RawMessage> {
+        self.inward_queue.receive_async().unwrap()
+    }
+
+    pub fn receive_async_all(&mut self) -> Vec<RawMessage> {
+        self.inward_queue.receive_all().unwrap()
+    }
+
+    pub fn receive(&mut self) -> RawMessage {
+        self.inward_queue.receive().unwrap()
     }
 }
 

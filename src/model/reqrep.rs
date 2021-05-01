@@ -12,8 +12,8 @@
 //! use rustymq::transport::network::tcp;
 //! # fn main() {
 //!
-//! let mut replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new()));
-//! let mut requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! let mut replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new())).unwrap();
+//! let mut requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
 //!
 //! replier.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
 //! requestor.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
@@ -37,14 +37,16 @@
 //! # }
 //! ```
 
+use core::config::TransportConfiguration;
 use core::message::{
     ConversationId, Message, MessageMetadata, Part, PartError, PeerId, RawMessage,
 };
+use core::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
 use core::socket::{
     BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket,
     SocketError, SocketInternalError,
 };
-use core::transport::{AcceptorTransport, InitiatorTransport, TransportMethod};
+use core::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
 
 use std::collections::HashMap;
 
@@ -218,6 +220,26 @@ impl ConnectionTracker {
     }
 }
 
+fn validate_transport_configuration<T: Transport>(
+    transport: &T,
+) -> Result<(), TransportConfiguration> {
+    match transport.query_configuration() {
+        Some(config) => {
+            match config.queue_policy.overflow {
+                Some((MessageQueueOverflowHandling::Drop, depth)) => {
+                    return Err(TransportConfiguration::new().with_queue_policy(
+                        MessageQueueingPolicy::default()
+                            .with_overflow(Some((MessageQueueOverflowHandling::Drop, depth))),
+                    ))
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        None => Ok(()),
+    }
+}
+
 /// # Request socket
 /// This allows connections to peers running  [`ReplySocket`]s. It allowed to connect to multiple
 /// reply sockets with the limitation that if multiple connections are managed then [`PeerId`]s have to be
@@ -232,11 +254,12 @@ where
     T: InitiatorTransport,
 {
     /// Create a new request socket using the underlieing transport
-    pub fn new(transport: T) -> Self {
-        Self {
+    pub fn new(transport: T) -> Result<Self, TransportConfiguration> {
+        validate_transport_configuration(&transport)?;
+        Ok(Self {
             transport: transport,
             tracker: ConnectionTracker::new(),
-        }
+        })
     }
 
     fn handle_received_message_model_id(
@@ -354,11 +377,12 @@ impl<T> ReplySocket<T>
 where
     T: AcceptorTransport,
 {
-    pub fn new(transport: T) -> Self {
-        Self {
+    pub fn new(transport: T) -> Result<Self, TransportConfiguration> {
+        validate_transport_configuration(&transport)?;
+        Ok(Self {
             transport: transport,
             tracker: ConnectionTracker::new(),
-        }
+        })
     }
 
     pub fn handle_received_message_model_id(

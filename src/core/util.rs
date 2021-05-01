@@ -356,10 +356,21 @@ pub mod thread {
             mutex: &'a ChangeNotifyMutex<T>,
         ) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
             let internal_mutex_guard = mutex.lock()?;
-            Ok(Self {
-                internal_mutex_guard: Some(internal_mutex_guard),
+            Ok(Self::with_mutex_ref(mutex, internal_mutex_guard))
+        }
+
+        pub fn with_mutex_ref(
+            mutex: &'a ChangeNotifyMutex<T>,
+            mutex_ref: MutexGuard<'a, T>,
+        ) -> Self {
+            Self {
+                internal_mutex_guard: Some(mutex_ref),
                 mutex: mutex,
-            })
+            }
+        }
+
+        pub fn into_internal_guard(mut self) -> MutexGuard<'a, T> {
+            self.internal_mutex_guard.take().unwrap()
         }
     }
 
@@ -370,9 +381,13 @@ pub mod thread {
         fn drop(&mut self) {
             #[allow(unused_must_use)]
             {
-                self.internal_mutex_guard.take().unwrap();
+                if match self.internal_mutex_guard.take() {
+                    Some(_mutex) => true,
+                    None => false,
+                } {
+                    self.mutex.notify_all();
+                }
             }
-            self.mutex.notify_all();
         }
     }
 
@@ -404,16 +419,21 @@ pub mod thread {
     }
 
     pub type ChgNtfMutex<T> = ChangeNotifyMutex<T>;
+    pub type ChgNtfMutexGuard<'a, T> = ChangeNotifyMutexGuard<'a, T>;
 
     impl<T> ChangeNotifyMutex<T>
     where
         T: Send + Sync,
     {
-        pub fn new(value: T) -> Arc<Self> {
-            Arc::new(Self {
+        pub fn new(value: T) -> Self {
+            Self {
                 value: Mutex::new(value),
                 var: Condvar::new(),
-            })
+            }
+        }
+
+        pub fn new_arc(value: T) -> Arc<Self> {
+            Arc::new(Self::new(value))
         }
 
         pub fn lock<'a>(&'a self) -> LockResult<MutexGuard<'a, T>> {
@@ -435,6 +455,19 @@ pub mod thread {
             guard: MutexGuard<'a, T>,
         ) -> LockResult<MutexGuard<'a, T>> {
             self.var.wait(guard)
+        }
+
+        pub fn wait_on_lock_notified<'a>(
+            &'a self,
+            guard: ChangeNotifyMutexGuard<'a, T>,
+        ) -> LockResult<ChangeNotifyMutexGuard<'a, T>> {
+            let wait_result = self.var.wait(guard.into_internal_guard());
+            match wait_result {
+                Ok(mutex) => Ok(ChangeNotifyMutexGuard::with_mutex_ref(self, mutex)),
+                Err(poison_error) => Err(PoisonError::new({
+                    ChangeNotifyMutexGuard::with_mutex_ref(self, poison_error.into_inner())
+                })),
+            }
         }
 
         pub fn wait_while<'a, F: for<'r> FnMut(&'r mut T) -> bool>(
@@ -476,6 +509,23 @@ pub mod thread {
                     let (guard, timeout) = poison_error.into_inner();
                     Err(PoisonError::new((guard, Some(timeout))))
                 }
+            }
+        }
+
+        pub fn wait_timeout_on_lock_notified<'a>(
+            &'a self,
+            guard: ChangeNotifyMutexGuard<'a, T>,
+            timeout: std::time::Duration,
+        ) -> LockResult<(ChangeNotifyMutexGuard<'a, T>, WaitTimeoutResult)> {
+            let wait_result = self.var.wait_timeout(guard.into_internal_guard(), timeout);
+            match wait_result {
+                Ok((mutex, timeout)) => {
+                    Ok((ChangeNotifyMutexGuard::with_mutex_ref(self, mutex), timeout))
+                }
+                Err(poison_error) => Err(PoisonError::new({
+                    let (mutex, timeout) = poison_error.into_inner();
+                    (ChangeNotifyMutexGuard::with_mutex_ref(self, mutex), timeout)
+                })),
             }
         }
 
