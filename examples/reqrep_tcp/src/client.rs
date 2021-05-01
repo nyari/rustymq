@@ -25,7 +25,7 @@ impl<Socket> OperationClient<Socket>
     }
 
     /// Start executing the server on `threadcount` number of threads
-    pub fn execute_client(mut self) {
+    pub fn execute_client(self) {
         let mut rnd = rand::thread_rng();
         loop {
             let operation = match rnd.gen_range(0, 1) {
@@ -39,8 +39,8 @@ impl<Socket> OperationClient<Socket>
             };
             let message = TypedMessage::new(data::TimedOperation(operation, Duration::now()));
             println!("Request: Conversation: {}", message.conversation_id().get());
-            self.socket.send_typed(message, OpFlag::Wait).unwrap();
-            let result = self.socket.receive_typed::<data::TimedOperation<data::OperationResult>>(OpFlag::Wait).unwrap();
+            self.socket.send_typed(message, OpFlag::NoWait).unwrap();
+            while let Ok(result) = self.socket.receive_typed::<data::TimedOperation<data::OperationResult>>(OpFlag::NoWait)
             {
                 let elapsed_duration = Duration::now().0 - result.payload().1.0;
                 println!("Response: Conversation: {}. Elapsed milisecs: {}", result.conversation_id().get(), elapsed_duration.as_millis());

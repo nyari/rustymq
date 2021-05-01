@@ -30,7 +30,7 @@ impl<Socket> OperationServer<Socket>
             let mut result: Vec<thread::JoinHandle<()>> = Vec::new();
 
             for _count in 0..threadcount {
-                let mut arc_socket = self.socket.clone();
+                let arc_socket = self.socket.clone();
                 // Create threads that handle new messages
                 result.push(thread::spawn(move || {
                     loop {
