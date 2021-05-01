@@ -55,7 +55,9 @@ impl RawMessageReader {
             | Err(serializer::Error::ByteOrderMarkError) => {
                 Err(SocketInternalError::UnknownDataFormatReceived)
             }
-            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::UnknownInternalError("Could not parse incoming message from stream".to_string())),
+            Err(serializer::Error::EndOfBuffer) => Err(SocketInternalError::UnknownInternalError(
+                "Could not parse incoming message from stream".to_string(),
+            )),
             _ => panic!("Any other case should already have been handled"),
         }
     }

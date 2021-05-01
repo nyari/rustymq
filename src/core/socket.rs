@@ -4,14 +4,14 @@
 use core::message::{
     Message, MessageMetadata, PeerId, RawMessage, SerializableMessagePayload, TypedMessage,
 };
-use core::transport::TransportMethod;
 use core::queue::{MessageQueueError, ReceiptState};
+use core::transport::TransportMethod;
 use core::util;
 
 use std::convert::{From, TryFrom};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::string::String;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// # Operation flags
 /// Configuration for individual send and receive calls on [`InwardSocket`]s and [`OutwardSocket`]s
@@ -112,9 +112,14 @@ impl SocketInternalError {
 impl From<MessageQueueError> for SocketInternalError {
     fn from(input: MessageQueueError) -> SocketInternalError {
         match input {
-            MessageQueueError::ReceiversAllDropped | MessageQueueError::SendersAllDropped => SocketInternalError::Disconnected,
+            MessageQueueError::ReceiversAllDropped | MessageQueueError::SendersAllDropped => {
+                SocketInternalError::Disconnected
+            }
             MessageQueueError::QueueFull => SocketInternalError::QueueDepthReached,
-            _ => SocketInternalError::UnknownInternalError(format!("Could not convert to SocketInternalError: {:?}", input))
+            _ => SocketInternalError::UnknownInternalError(format!(
+                "Could not convert to SocketInternalError: {:?}",
+                input
+            )),
         }
     }
 }
@@ -123,7 +128,10 @@ impl From<ReceiptState> for SocketInternalError {
     fn from(input: ReceiptState) -> SocketInternalError {
         match input {
             ReceiptState::Dropped => SocketInternalError::Disconnected,
-            _ => SocketInternalError::UnknownInternalError(format!("Could not convert to SocketInternalError: {:?}", input))
+            _ => SocketInternalError::UnknownInternalError(format!(
+                "Could not convert to SocketInternalError: {:?}",
+                input
+            )),
         }
     }
 }
@@ -432,18 +440,14 @@ where
 {
     fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         match flags {
-            OpFlag::Wait => {
-                util::thread::poll_mut(std::time::Duration::from_millis(1), || {
-                    match self.lock_ref().receive(OpFlag::NoWait) {
-                        Ok(message) => Some(Ok(message)),
-                        Err((_, SocketError::Timeout)) => None,
-                        Err(err) => Some(Err(err))
-                    }
-                })
-            },
-            OpFlag::NoWait => {
-                self.lock_ref().receive(flags)
-            }
+            OpFlag::Wait => util::thread::poll_mut(std::time::Duration::from_millis(1), || {
+                match self.lock_ref().receive(OpFlag::NoWait) {
+                    Ok(message) => Some(Ok(message)),
+                    Err((_, SocketError::Timeout)) => None,
+                    Err(err) => Some(Err(err)),
+                }
+            }),
+            OpFlag::NoWait => self.lock_ref().receive(flags),
         }
     }
 }
@@ -452,11 +456,7 @@ impl<T> OutwardSocket for ArcSocket<T>
 where
     T: OutwardSocket,
 {
-    fn send(
-        &mut self,
-        message: RawMessage,
-        flags: OpFlag,
-    ) -> Result<MessageMetadata, SocketError> {
+    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
         self.lock_ref().send(message, flags)
     }
 }

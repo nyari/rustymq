@@ -3,8 +3,8 @@
 
 use super::internal::*;
 use core::config::TransportConfiguration;
-use core::queue::{MessageQueueSender, MessageQueueReceiver};
 use core::message::{PeerId, RawMessage};
+use core::queue::{MessageQueueReceiver, MessageQueueSender};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::transport::NetworkAddress;
@@ -107,7 +107,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
             stream,
             MessageQueueReceiver::new(config.queue_policy.clone()),
             inward_queue,
-            peer_id
+            peer_id,
         ))
     }
 
@@ -127,7 +127,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
             stream,
             MessageQueueReceiver::new(config.queue_policy.clone()),
             inward_queue,
-            peer_id
+            peer_id,
         ))
     }
 }

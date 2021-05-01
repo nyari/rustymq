@@ -1,14 +1,14 @@
-use core::message::{Message, RawMessage, PeerId};
-use core::queue::{MessageQueueSender, MessageQueueReceiver, SenderReceipt, MessageQueueError};
+use core::message::{Message, PeerId, RawMessage};
+use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, SenderReceipt};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
+use std::collections::VecDeque;
 use std::io;
 use std::thread;
 use std::time::Duration;
-use std::collections::{VecDeque};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 
@@ -102,7 +102,9 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
                 }
             }
             Err(stream::State::Stream(err)) => Err(err),
-            Err(stream::State::Remainder) => Err(SocketInternalError::UnknownInternalError("Unknown error while writing into Stream".to_string())),
+            Err(stream::State::Remainder) => Err(SocketInternalError::UnknownInternalError(
+                "Unknown error while writing into Stream".to_string(),
+            )),
         }
     }
 
@@ -110,16 +112,12 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
         match self.outward_queue.receive_async_with_receipt() {
             Ok(Some((Some(receipt), message))) => Ok(self.writer =
-                stream::RawMessageWriter::new_with_receipt(
-                    message,
-                    BUFFER_BATCH_SIZE,
-                    receipt,
-                )),
+                stream::RawMessageWriter::new_with_receipt(message, BUFFER_BATCH_SIZE, receipt)),
             Ok(Some((None, message))) => {
                 Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
             }
             Ok(None) => Err(stream::State::Empty),
-            Err(err) => Err(stream::State::Stream(err.into()))
+            Err(err) => Err(stream::State::Stream(err.into())),
         }
     }
 
@@ -133,20 +131,24 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         if self.last_received.is_empty() {
             let messages = self.reader.read_into(&mut self.stream)?;
             let peer_id = self.peer_id.clone();
-            self.last_received.extend(messages.into_iter().map(|msg| msg.apply_peer_id(peer_id)));
+            self.last_received
+                .extend(messages.into_iter().map(|msg| msg.apply_peer_id(peer_id)));
         }
 
         while !self.last_received.is_empty() {
-            match self.inward_queue.send_unless_full(self.last_received.pop_front().unwrap()) {
+            match self
+                .inward_queue
+                .send_unless_full(self.last_received.pop_front().unwrap())
+            {
                 Ok(_) => (),
                 Err((MessageQueueError::QueueFull, message)) => {
                     self.last_received.push_front(message);
-                    return Ok(())
-                },
+                    return Ok(());
+                }
                 Err((err, message)) => {
                     self.last_received.push_front(message);
-                    return Err(stream::State::Stream(err.into()))
-                } 
+                    return Err(stream::State::Stream(err.into()));
+                }
             }
         }
         Ok(())

@@ -227,8 +227,10 @@ fn validate_transport_configuration<T: Transport>(
         Some(config) => {
             match config.queue_policy.overflow {
                 Some((MessageQueueOverflowHandling::Drop, depth)) => {
-                    return Err(TransportConfiguration::new()
-                        .with_queue_policy(MessageQueueingPolicy::default().with_overflow(Some((MessageQueueOverflowHandling::Drop, depth)))))
+                    return Err(TransportConfiguration::new().with_queue_policy(
+                        MessageQueueingPolicy::default()
+                            .with_overflow(Some((MessageQueueOverflowHandling::Drop, depth))),
+                    ))
                 }
                 _ => {}
             }

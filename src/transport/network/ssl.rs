@@ -6,9 +6,9 @@ use super::internal::*;
 use openssl::ssl::{SslAcceptor, SslConnector, SslStream};
 use std::net::SocketAddr;
 
+use core::config::TransportConfiguration;
 use core::message::{PeerId, RawMessage};
-use core::queue::{MessageQueueSender, MessageQueueReceiver};
-use core::config::{TransportConfiguration};
+use core::queue::{MessageQueueReceiver, MessageQueueSender};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::transport::NetworkAddress;
@@ -182,7 +182,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
             stream,
             MessageQueueReceiver::new(config.queue_policy.clone()),
             inward_queue,
-            peer_id
+            peer_id,
         ))
     }
 }

@@ -22,7 +22,10 @@ impl From<io::Error> for SocketInternalError {
             io::ErrorKind::Interrupted => SocketInternalError::Disconnected,
             io::ErrorKind::NotConnected => SocketInternalError::Disconnected,
             io::ErrorKind::TimedOut => SocketInternalError::Timeout,
-            _ => SocketInternalError::UnknownInternalError(format!("Stream error that cannot be handled: {:?}", error.kind())),
+            _ => SocketInternalError::UnknownInternalError(format!(
+                "Stream error that cannot be handled: {:?}",
+                error.kind()
+            )),
         }
     }
 }

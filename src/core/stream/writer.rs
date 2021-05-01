@@ -1,6 +1,6 @@
 use core::message::{Buffer, RawMessage};
-use core::serializer::{BufferSlice, FlatSerializer, Serializer};
 use core::queue::ReceiverReceipt;
+use core::serializer::{BufferSlice, FlatSerializer, Serializer};
 
 use super::State;
 
