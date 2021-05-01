@@ -3,7 +3,8 @@
 
 use super::internal::*;
 use core::config::TransportConfiguration;
-use core::queue::{InwardMessageQueueNotifier, InwardMessageQueue, OutwardMessageQueue};
+use core::queue::{MessageQueueSender, MessageQueueReceiver};
+use core::message::{PeerId, RawMessage};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::transport::NetworkAddress;
@@ -94,7 +95,8 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         &self,
         config: &TransportConfiguration,
         addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         let stream = net::TcpStream::connect(addr)?;
         //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
@@ -103,8 +105,9 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         )))?;
         Ok(stream::ReadWriteStreamConnection::new(
             stream,
-            OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
-            InwardMessageQueue::new(inward_queue_notifier),
+            MessageQueueReceiver::new(config.queue_policy.clone()),
+            inward_queue,
+            peer_id
         ))
     }
 
@@ -113,7 +116,8 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         config: &TransportConfiguration,
         stream: net::TcpStream,
         _addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         //stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(
@@ -121,8 +125,9 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         )))?;
         Ok(stream::ReadWriteStreamConnection::new(
             stream,
-            OutwardMessageQueue::new().with_policy(config.queue_policy.clone()),
-            InwardMessageQueue::new(inward_queue_notifier),
+            MessageQueueReceiver::new(config.queue_policy.clone()),
+            inward_queue,
+            peer_id
         ))
     }
 }

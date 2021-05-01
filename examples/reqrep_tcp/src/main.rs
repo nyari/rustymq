@@ -16,7 +16,7 @@ fn main() {
     use rustymq::core::transport::{TransportMethod, NetworkAddress};
     use rustymq::model::reqrep::{ReplySocket, RequestSocket};
     use rustymq::core::config::{TransportConfiguration};
-    use rustymq::core::queue::{QueueOverflowHandling};
+    use rustymq::core::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
     use rustymq::transport::network::tcp::{InitiatorTransport, AcceptorTransport, StreamConnectionBuilder, StreamListenerBuilder};
 
     let arguments = App::new("RustyMQ Request-Reply TCP Example")
@@ -40,13 +40,13 @@ fn main() {
     if arguments.value_of("mode").unwrap() == "server".to_string() {
         let mut socket = ReplySocket::new(AcceptorTransport::with_configuration(StreamConnectionBuilder::new(),
                                                                                 StreamListenerBuilder::new(),
-                                                                                TransportConfiguration::new().with_queue_policy(Some((QueueOverflowHandling::Throttle, 100))))).unwrap();
+                                                                                TransportConfiguration::new().with_queue_policy(MessageQueueingPolicy::default().with_overflow(Some((MessageQueueOverflowHandling::Throttle, 100)))))).unwrap();
         socket.bind(transport_method).unwrap();
         let server = server::OperationServer::new(socket);
         server.execute_threads(8);
     } else if arguments.value_of("mode").unwrap() == "client".to_string() {
         let mut socket = RequestSocket::new(InitiatorTransport::with_configuration(StreamConnectionBuilder::new(),
-                                                                                   TransportConfiguration::new().with_queue_policy(Some((QueueOverflowHandling::Throttle, 25))))).unwrap();
+                                                                                   TransportConfiguration::new().with_queue_policy(MessageQueueingPolicy::default().with_overflow(Some((MessageQueueOverflowHandling::Throttle, 25)))))).unwrap();
         socket.connect(transport_method).unwrap();
         let client = client::OperationClient::new(socket);
         client.execute_client();

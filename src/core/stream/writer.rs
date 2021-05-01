@@ -1,7 +1,6 @@
 use core::message::{Buffer, RawMessage};
 use core::serializer::{BufferSlice, FlatSerializer, Serializer};
-use core::util::thread::ChgNtfMutex;
-use std::sync::Arc;
+use core::queue::ReceiverReceipt;
 
 use super::State;
 
@@ -9,7 +8,7 @@ use std::io::Write;
 
 pub struct RawMessageWriter {
     buffer: Buffer,
-    semaphore: Option<Arc<ChgNtfMutex<bool>>>,
+    receipt: Option<ReceiverReceipt>,
     batch_size: usize,
     offset: usize,
 }
@@ -22,16 +21,16 @@ impl RawMessageWriter {
                 serializer.serialize(&message);
                 serializer.finalize()
             },
-            semaphore: None,
+            receipt: None,
             batch_size: batch_size,
             offset: 0,
         }
     }
 
-    pub fn new_with_semaphore(
+    pub fn new_with_receipt(
         message: RawMessage,
         batch_size: usize,
-        semaphore: Arc<ChgNtfMutex<bool>>,
+        receipt: ReceiverReceipt,
     ) -> Self {
         Self {
             buffer: {
@@ -39,7 +38,7 @@ impl RawMessageWriter {
                 serializer.serialize(&message);
                 serializer.finalize()
             },
-            semaphore: Some(semaphore),
+            receipt: Some(receipt),
             batch_size: batch_size,
             offset: 0,
         }
@@ -48,7 +47,7 @@ impl RawMessageWriter {
     pub fn new_empty() -> Self {
         Self {
             buffer: Buffer::new(),
-            semaphore: None,
+            receipt: None,
             batch_size: 0,
             offset: 0,
         }
@@ -72,8 +71,8 @@ impl RawMessageWriter {
         if amount <= self.batch_size {
             self.offset += amount;
             if self.is_empty() {
-                if let Some(finished_semaphore) = self.semaphore.take() {
-                    *finished_semaphore.lock_notify().unwrap() = true;
+                if let Some(finished_receipt) = self.receipt.take() {
+                    finished_receipt.processed()
                 }
             }
         } else {

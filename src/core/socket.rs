@@ -5,6 +5,7 @@ use core::message::{
     Message, MessageMetadata, PeerId, RawMessage, SerializableMessagePayload, TypedMessage,
 };
 use core::transport::TransportMethod;
+use core::queue::{MessageQueueError, ReceiptState};
 
 use std::convert::{From, TryFrom};
 use std::ops::Deref;
@@ -103,6 +104,25 @@ impl SocketInternalError {
     /// Create user [`SocketError`] from internal error. Will panic in case of error is not handleable by user
     pub fn externalize_error(err: SocketInternalError) -> SocketError {
         SocketError::from(err)
+    }
+}
+
+impl From<MessageQueueError> for SocketInternalError {
+    fn from(input: MessageQueueError) -> SocketInternalError {
+        match input {
+            MessageQueueError::ReceiversAllDropped | MessageQueueError::SendersAllDropped => SocketInternalError::Disconnected,
+            MessageQueueError::QueueFull => SocketInternalError::QueueDepthReached,
+            _ => panic!("Internal error, {:?} cannot be converted to SocketInternalError", input)
+        }
+    }
+}
+
+impl From<ReceiptState> for SocketInternalError {
+    fn from(input: ReceiptState) -> SocketInternalError {
+        match input {
+            ReceiptState::Dropped => SocketInternalError::Disconnected,
+            _ => panic!("Internal error, {:?} cannot be converted to SocketInternalError", input)
+        }
     }
 }
 

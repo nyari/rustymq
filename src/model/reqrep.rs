@@ -41,7 +41,7 @@ use core::config::TransportConfiguration;
 use core::message::{
     ConversationId, Message, MessageMetadata, Part, PartError, PeerId, RawMessage,
 };
-use core::queue::QueueOverflowHandling;
+use core::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
 use core::socket::{
     BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket,
     SocketError, SocketInternalError,
@@ -225,10 +225,10 @@ fn validate_transport_configuration<T: Transport>(
 ) -> Result<(), TransportConfiguration> {
     match transport.query_configuration() {
         Some(config) => {
-            match config.queue_policy {
-                Some((QueueOverflowHandling::Drop, depth)) => {
+            match config.queue_policy.overflow {
+                Some((MessageQueueOverflowHandling::Drop, depth)) => {
                     return Err(TransportConfiguration::new()
-                        .with_queue_policy(Some((QueueOverflowHandling::Drop, depth))))
+                        .with_queue_policy(MessageQueueingPolicy::default().with_overflow(Some((MessageQueueOverflowHandling::Drop, depth)))))
                 }
                 _ => {}
             }

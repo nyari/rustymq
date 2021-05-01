@@ -3,7 +3,7 @@
 
 use core::config::TransportConfiguration;
 use core::message::{Message, PeerId, RawMessage};
-use core::queue::{InwardMessageQueueNotifier};
+use core::queue::{MessageQueueReceiver, MessageQueueSender, MessageQueueError};
 use core::socket::{OpFlag, PeerIdentification, SocketError, SocketInternalError};
 use core::stream;
 use core::transport::{
@@ -12,7 +12,7 @@ use core::transport::{
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::io::{Read, Write};
 use std::iter::FromIterator;
@@ -57,7 +57,8 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
         &self,
         config: &TransportConfiguration,
         addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn accept_connection(
@@ -65,19 +66,22 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
         config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError>;
 
     fn manager_connect(
         &self,
         config: &TransportConfiguration,
         addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.connect(
             config,
             addr,
-            inward_queue_notifier,
+            peer_id,
+            inward_queue
         )?)
     }
 
@@ -86,13 +90,15 @@ pub trait NetworkStreamConnectionBuilder: Send + Sync + Sized + Clone + 'static 
         config: &TransportConfiguration,
         stream: Self::Stream,
         addr: NetworkAddress,
-        inward_queue_notifier: InwardMessageQueueNotifier,
+        peer_id: PeerId,
+        inward_queue: MessageQueueSender<RawMessage>,
     ) -> Result<stream::ReadWriteStreamConnectionThreadManager, SocketInternalError> {
         stream::ReadWriteStreamConnectionThreadManager::execute_thread_for(self.accept_connection(
             config,
             stream,
             addr,
-            inward_queue_notifier,
+            peer_id,
+            inward_queue,
         )?)
     }
 }
@@ -101,8 +107,7 @@ pub struct NetworkConnectionPeerManager {
     peer_table: HashMap<PeerId, stream::ReadWriteStreamConnectionThreadManager>,
     addresses: HashMap<SocketAddr, PeerId>,
     peers: HashMap<PeerId, SocketAddr>,
-    inward_queue_notifier: InwardMessageQueueNotifier,
-    inward_queue: VecDeque<RawMessage>,
+    inward_queue: MessageQueueReceiver<RawMessage>,
     config: TransportConfiguration,
 }
 
@@ -112,8 +117,7 @@ impl NetworkConnectionPeerManager {
             peer_table: HashMap::new(),
             addresses: HashMap::new(),
             peers: HashMap::new(),
-            inward_queue_notifier: InwardMessageQueueNotifier::new(),
-            inward_queue: VecDeque::new(),
+            inward_queue: MessageQueueReceiver::new(config.clone().queue_policy),
             config: config,
         }
     }
@@ -146,7 +150,8 @@ impl NetworkConnectionPeerManager {
             &self.config,
             stream,
             addr.clone(),
-            self.inward_queue_notifier.clone(),
+            peer_id.clone(),
+            self.inward_queue.sender_pair(),
         ) {
             Ok(connection) => {
                 self.commit_onnection(connection, addr.get_address(), peer_id.clone());
@@ -168,23 +173,6 @@ impl NetworkConnectionPeerManager {
             OpFlag::NoWait => connection.send_async(message),
         }
     }
-
-    // fn handle_peer_error(&mut self, peer_id: PeerId) -> Result<(), SocketInternalError> {
-    //     let (result, disconnect_peer) = match self.peer_table.get_mut(&peer_id) {
-    //         Some(peer) => {
-    //             (peer.check_worker_state(), true)
-    //         },
-    //         None => (Err(SocketInternalError::UnrelatedPeer), false)
-    //     };
-
-    //     println!("{:?}", result);
-
-    //     if disconnect_peer {
-    //         self.close_connection(PeerIdentification::PeerId(peer_id))?;
-    //     }
-
-    //     result
-    // }
 
     fn handle_next_error(&mut self) -> Result<(), (Option<PeerId>, SocketInternalError)> {
         let lost_peer = self
@@ -211,13 +199,16 @@ impl NetworkConnectionPeerManager {
     pub fn receive_message(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketInternalError)> {
         self.handle_next_error()?;
         match flags {
-            OpFlag::Wait => { 
-                self.receive_all_internal();
-                Ok(self.inward_queue.pop_front().unwrap())
+            OpFlag::Wait => match self.inward_queue.receive() {
+                Ok(message) => Ok(message),
+                Err(MessageQueueError::SendersAllDropped) => {self.handle_next_error()?; Err((None, SocketInternalError::Timeout))},
+                _ => panic!("Unqueueing resulted in unhandleable error")
             },
-            OpFlag::NoWait => {
-                self.receive_async_all_internal();
-                self.inward_queue.pop_front().ok_or((None, SocketInternalError::Timeout))
+            OpFlag::NoWait => match self.inward_queue.receive_async() {
+                Ok(Some(message)) => Ok(message),
+                Ok(None) => Err((None, SocketInternalError::Timeout)),
+                Err(MessageQueueError::SendersAllDropped) => {self.handle_next_error()?; Err((None, SocketInternalError::Timeout))},
+                _ => panic!("Unqueueing resulted in unhandleable error")
             }
         }
     }
@@ -285,7 +276,8 @@ impl NetworkConnectionPeerManager {
         match builder.manager_connect(
             &self.config,
             address.clone(),
-            self.inward_queue_notifier.clone(),
+            peer_id.clone(),
+            self.inward_queue.sender_pair(),
         ) {
             Ok(connection) => {
                 Ok(self.commit_onnection(connection, address.get_address(), peer_id.clone()))
@@ -309,24 +301,6 @@ impl NetworkConnectionPeerManager {
 
     fn is_already_connected(&self, address: &SocketAddr) -> bool {
         self.addresses.contains_key(address)
-    }
-
-    fn receive_all_internal(&mut self) {
-        if self.inward_queue.is_empty() && self.inward_queue_notifier.wait_for_change() {
-            self.receive_fill_internal_queue();
-        }
-    }
-
-    fn receive_async_all_internal(&mut self) {
-        if self.inward_queue.is_empty() && self.inward_queue_notifier.take_was_change() {
-            self.receive_fill_internal_queue();
-        }
-    }
-
-    fn receive_fill_internal_queue(&mut self) {
-        for (peer_id, peer) in self.peer_table.iter_mut() {
-            self.inward_queue.extend(peer.receive_async_all().into_iter().map(|message| {message.apply_peer_id(peer_id.clone())}))    
-        };
     }
 }
 

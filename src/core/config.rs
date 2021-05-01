@@ -1,23 +1,23 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use core::queue::QueueingPolicy;
+use core::queue::MessageQueueingPolicy;
 
 #[derive(Debug, Clone)]
 pub struct TransportConfiguration {
-    pub queue_policy: Option<QueueingPolicy>,
+    pub queue_policy: MessageQueueingPolicy,
     pub extra: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl TransportConfiguration {
     pub fn new() -> Self {
         Self {
-            queue_policy: None,
+            queue_policy: MessageQueueingPolicy::default(),
             extra: None,
         }
     }
 
-    pub fn with_queue_policy(self, policy: Option<QueueingPolicy>) -> Self {
+    pub fn with_queue_policy(self, policy: MessageQueueingPolicy) -> Self {
         Self {
             queue_policy: policy,
             ..self

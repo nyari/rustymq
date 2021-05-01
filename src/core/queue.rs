@@ -1,10 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::VecDeque, ops::DerefMut};
+use std::collections::VecDeque;
 use std::ops::{Deref, Drop};
 
-use core::message::{RawMessage};
-use core::socket::SocketInternalError;
 use core::util::thread::ChgNtfMutex;
 
 #[derive(Debug)]
@@ -25,12 +23,27 @@ pub enum MessageQueueOverflowHandling {
     Panic,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MessageQueueingPolicy {
     pub overflow: Option<(MessageQueueOverflowHandling, usize)>
 }
 
-#[derive(Copy, Clone)]
+impl MessageQueueingPolicy {
+    pub fn default() -> Self {
+        Self {
+            overflow: None
+        }
+    }
+
+    pub fn with_overflow(self, overflow: Option<(MessageQueueOverflowHandling, usize)>) -> Self {
+        Self {
+            overflow: overflow,
+            ..self
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum ReceiptState {
     /// The message is still in queue
     InQueue,
@@ -182,11 +195,72 @@ impl ReceiverReceipt {
     }
 }
 
+struct MessageQueueCounter {
+    receiver_count: Option<usize>,
+    sender_count: Option<usize>,
+}
+
+impl MessageQueueCounter {
+    pub fn new() -> Self {
+        Self {
+            receiver_count: Some(0),
+            sender_count: Some(0)
+        }
+    }
+
+    fn increment_counter(count: &mut Option<usize>) {
+        *count = match count.as_ref() {
+            Some(value) => Some(value + 1 as usize),
+            None => Some(1)
+        };
+    }
+
+    fn decrement_counter(count: &mut Option<usize>) {
+        *count = match count.as_ref() {
+            Some(value) => if *value > 1 {
+                Some(value - 1 as usize)
+            } else if *value == 1 {
+                None
+            } else {
+                panic!("Counter cannot be decremented")
+            },
+            None => panic!("Counter cannot be decremented")
+        };
+    }
+
+    pub fn increment_receiver(&mut self) {
+        Self::increment_counter(&mut self.receiver_count)
+    }
+
+    pub fn increment_sender(&mut self) {
+        Self::increment_counter(&mut self.sender_count)
+    }
+
+    pub fn decrement_receiver(&mut self) {
+        Self::decrement_counter(&mut self.receiver_count)
+    }
+
+    pub fn decrement_sender(&mut self) {
+        Self::decrement_counter(&mut self.sender_count)
+    }
+
+    pub fn sender_count(&self) -> usize {
+        self.sender_count.unwrap_or(0)
+    }
+
+    pub fn senders_dropped(&self) -> bool {
+        self.sender_count.is_none()
+    }
+
+    pub fn receivers_dropped(&self) -> bool {
+        self.receiver_count.is_none()
+    }
+}
+
 struct MessageQueueInternalData<T> 
     where T: Send + Sync {
     pub queue: VecDeque<(Option<ReceiptInternalData>, T)>,
-    pub receiver_count: usize,
-    pub sender_count: usize,
+    pub counters: MessageQueueCounter,
     pub policy: MessageQueueingPolicy
 }
 
@@ -195,23 +269,22 @@ impl<T> MessageQueueInternalData<T>
     fn new(policy: MessageQueueingPolicy) -> Self {
         Self {
             queue: VecDeque::new(),
-            receiver_count: 0,
-            sender_count: 0,
+            counters: MessageQueueCounter::new(),
             policy: policy
         }
     }
 
-    fn has_receiver(&self) -> bool {
-        self.receiver_count > 0
+    fn receivers_all_dropped(&self) -> bool {
+        self.counters.receivers_dropped()
     }
 
-    fn has_sender(&self) -> bool {
-        self.sender_count > 0
+    fn senders_all_dropped(&self) -> bool {
+        self.counters.senders_dropped()
     }
 
     fn is_queue_full(&self) -> bool {
         match self.policy.overflow {
-            Some((_, limit)) => limit <= self.queue.len(),
+            Some((_, limit)) => limit <= self.queue.len() * self.counters.sender_count(),
             None => false
         }
     }
@@ -239,7 +312,7 @@ impl<T> MessageQueueInternal<T>
                     return Ok(message)
                 },
                 None => {
-                    if !locked.has_sender() {
+                    if locked.senders_all_dropped() {
                         return Err(MessageQueueError::SendersAllDropped)
                     }
                 }
@@ -256,7 +329,7 @@ impl<T> MessageQueueInternal<T>
                     return Ok((receipt.map(|x| x.receiver_receipt()), message))
                 },
                 None => {
-                    if !locked.has_sender() {
+                    if locked.senders_all_dropped() {
                         return Err(MessageQueueError::SendersAllDropped)
                     }
                 }
@@ -274,7 +347,7 @@ impl<T> MessageQueueInternal<T>
                     return Ok(message)
                 },
                 None => {
-                    if !locked.has_sender() {
+                    if locked.senders_all_dropped() {
                         return Err(MessageQueueError::SendersAllDropped)
                     }
                 }
@@ -293,7 +366,7 @@ impl<T> MessageQueueInternal<T>
                     return Ok((receipt.map(|x| x.receiver_receipt()), message))
                 },
                 None => {
-                    if !locked.has_sender() {
+                    if locked.senders_all_dropped() {
                         return Err(MessageQueueError::SendersAllDropped)
                     }
                 }
@@ -312,7 +385,7 @@ impl<T> MessageQueueInternal<T>
                 Ok(Some(message))
             },
             None => {
-                if !locked.has_sender() {
+                if locked.senders_all_dropped() {
                     Err(MessageQueueError::SendersAllDropped)
                 } else {
                     Ok(None)
@@ -328,7 +401,7 @@ impl<T> MessageQueueInternal<T>
                 Ok(Some((receipt.map(|x| x.receiver_receipt()), message)))
             },
             None => {
-                if !locked.has_sender() {
+                if locked.senders_all_dropped() {
                     Err(MessageQueueError::SendersAllDropped)
                 } else {
                     Ok(None)
@@ -350,7 +423,7 @@ impl<T> MessageQueueInternal<T>
 
         if !result.is_empty() {
             Ok(result)
-        } else if !self.0.lock().unwrap().has_sender() {
+        } else if self.0.lock().unwrap().senders_all_dropped() {
             Err(MessageQueueError::SendersAllDropped)
         } else {
             Ok(result)
@@ -371,7 +444,7 @@ impl<T> MessageQueueInternal<T>
                                                              .collect();
         if !result.is_empty() {
             Ok(result)
-        } else if !self.0.lock().unwrap().has_sender() {
+        } else if self.0.lock().unwrap().senders_all_dropped() {
             Err(MessageQueueError::SendersAllDropped)
         } else {
             Ok(result)
@@ -380,12 +453,12 @@ impl<T> MessageQueueInternal<T>
 
     fn send(&self, message: T) -> Result<(), MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
-        
-        if !locked.has_receiver() {
-            return Err(MessageQueueError::ReceiversAllDropped)
-        }
 
         loop {
+            if locked.receivers_all_dropped() {
+                return Err(MessageQueueError::ReceiversAllDropped)
+            }
+
             if !locked.is_queue_full() {
                 locked.queue.push_back((None, message));
                 return Ok(());
@@ -408,13 +481,13 @@ impl<T> MessageQueueInternal<T>
 
     fn send_with_receipt(&self, message: T) -> Result<SenderReceipt, MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
-        
-        if !locked.has_receiver() {
-            return Err(MessageQueueError::ReceiversAllDropped)
-        }
 
         let receipt_internal = ReceiptInternalData::queue();
         loop {
+            if locked.receivers_all_dropped() {
+                return Err(MessageQueueError::ReceiversAllDropped)
+            }
+
             if !locked.is_queue_full() {
                 locked.queue.push_back((Some(receipt_internal.clone()), message));
                 return Ok(receipt_internal.sender_receipt());
@@ -451,10 +524,11 @@ pub struct MessageQueueReceiver<T>(MessageQueueInternal<T>) where T: Send + Sync
 impl<T> MessageQueueReceiver<T>
     where T: Send + Sync {
     pub fn new(policy: MessageQueueingPolicy) -> Self {
-        Self(MessageQueueInternal::new(policy))
+        Self::new_internals(MessageQueueInternal::new(policy))
     }
 
     fn new_internals(internals: MessageQueueInternal<T>) -> Self {
+        internals.0.lock_notify().unwrap().counters.increment_receiver();
         Self(internals)
     }
 
@@ -495,16 +569,25 @@ impl<T> MessageQueueReceiver<T>
     }
 }
 
+impl<T> Drop for MessageQueueReceiver<T>
+    where T: Send + Sync
+{
+    fn drop(&mut self) {
+        self.0.0.lock_notify().unwrap().counters.decrement_receiver();
+    }
+}
+
 #[derive(Clone)]
 pub struct MessageQueueSender<T>(MessageQueueInternal<T>) where T: Send + Sync;
 
 impl<T> MessageQueueSender<T>
     where T: Send + Sync {
     pub fn new(policy: MessageQueueingPolicy) -> Self {
-        Self(MessageQueueInternal::new(policy))
+        Self::new_internals(MessageQueueInternal::new(policy))
     }
 
     fn new_internals(internals: MessageQueueInternal<T>) -> Self {
+        internals.0.lock_notify().unwrap().counters.increment_sender();
         Self(internals)
     }
 
@@ -521,305 +604,10 @@ impl<T> MessageQueueSender<T>
     }
 }
 
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
-pub type QueueingPolicy = (QueueOverflowHandling, usize);
-
-#[derive(Debug, Clone)]
-pub enum QueueOverflowHandling {
-    Throttle,
-    Drop,
-    ErrorAndDrop,
-    ErrorAndForceExtend,
-    Panic,
-}
-
-struct QueuePolicyEnforcer<'a, T>
-where
-    T: Send + Sync,
+impl<T> Drop for MessageQueueSender<T>
+    where T: Send + Sync
 {
-    queue: &'a ChgNtfMutex<VecDeque<T>>,
-    policy: &'a Option<QueueingPolicy>,
-}
-
-impl<'a, T> QueuePolicyEnforcer<'a, T>
-where
-    T: Send + Sync,
-{
-    pub fn new(queue: &'a ChgNtfMutex<VecDeque<T>>, policy: &'a Option<QueueingPolicy>) -> Self {
-        Self {
-            queue: queue,
-            policy: policy,
-        }
-    }
-
-    fn grow_queue<F: FnOnce(&mut VecDeque<T>)>(
-        &self,
-        modifier: F,
-    ) -> Result<(), SocketInternalError> {
-        match self.policy {
-            None => Ok(modifier(self.queue.lock_notify().unwrap().deref_mut())),
-            Some((QueueOverflowHandling::Throttle, queue_depth)) => {
-                let mut queue = self.queue.lock_notify().unwrap();
-                while queue.len() >= *queue_depth {
-                    queue = self
-                        .queue
-                        .wait_timeout_on_lock_notified(queue, std::time::Duration::from_secs(1))
-                        .unwrap()
-                        .0;
-                }
-                Ok(modifier(queue.deref_mut()))
-            }
-            Some((QueueOverflowHandling::Drop, queue_depth)) => {
-                let mut queue = self.queue.lock_notify().unwrap();
-                if queue.len() < *queue_depth {
-                    modifier(queue.deref_mut());
-                }
-                Ok(())
-            }
-            Some((QueueOverflowHandling::ErrorAndDrop, queue_depth)) => {
-                let mut queue = self.queue.lock_notify().unwrap();
-                if queue.len() < *queue_depth {
-                    modifier(queue.deref_mut());
-                    Ok(())
-                } else {
-                    Err(SocketInternalError::QueueDepthReached)
-                }
-            }
-            Some((QueueOverflowHandling::ErrorAndForceExtend, queue_depth)) => {
-                let mut queue = self.queue.lock_notify().unwrap();
-                modifier(queue.deref_mut());
-                if queue.len() <= *queue_depth {
-                    Ok(())
-                } else {
-                    Err(SocketInternalError::QueueDepthReached)
-                }
-            }
-            Some((QueueOverflowHandling::Panic, queue_depth)) => {
-                let mut queue = self.queue.lock_notify().unwrap();
-                if queue.len() >= *queue_depth {
-                    panic!("Queue full");
-                }
-                Ok(modifier(queue.deref_mut()))
-            }
-        }
-    }
-
-    pub fn push_front(&'a self, value: T) -> Result<(), SocketInternalError> {
-        self.grow_queue(|queue| queue.push_front(value))
-    }
-
-    pub fn push_back(&'a self, value: T) -> Result<(), SocketInternalError> {
-        self.grow_queue(|queue| queue.push_back(value))
-    }
-
-    pub fn extend<I: std::iter::Iterator<Item = T>>(
-        &'a self,
-        iter: I,
-    ) -> Result<(), SocketInternalError> {
-        self.grow_queue(|queue| queue.extend(iter))
-    }
-
-    pub fn pop_front(&'a self) -> Option<T> {
-        self.queue.lock_notify().unwrap().pop_front()
-    }
-
-    pub fn pop_all(&'a self) -> Vec<T> {
-        self.queue.lock_notify().unwrap().drain(..).collect()
+    fn drop(&mut self) {
+        self.0.0.lock_notify().unwrap().counters.decrement_sender();
     }
 }
-
-#[derive(Clone)]
-pub struct OutwardMessageQueue {
-    outward_queue: Arc<ChgNtfMutex<VecDeque<(RawMessage, Option<Arc<ChgNtfMutex<bool>>>)>>>,
-    policy: Option<QueueingPolicy>,
-}
-
-impl OutwardMessageQueue {
-    pub fn new() -> Self {
-        Self {
-            outward_queue: Arc::new(ChgNtfMutex::new(VecDeque::new())),
-            policy: None,
-        }
-    }
-
-    pub fn with_policy(self, policy: Option<QueueingPolicy>) -> Self {
-        Self {
-            policy: policy,
-            ..self
-        }
-    }
-
-    pub fn add_to_outward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
-        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).push_back((message, None))
-    }
-
-    pub fn add_to_prio_outward_queue(
-        &self,
-        message: RawMessage,
-    ) -> Result<Arc<ChgNtfMutex<bool>>, SocketInternalError> {
-        let semaphore = ChgNtfMutex::new_arc(false);
-        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy)
-            .push_front((message, Some(semaphore.clone())))?;
-        Ok(semaphore)
-    }
-
-    pub fn pop_outward_queue(&self) -> Option<(RawMessage, Option<Arc<ChgNtfMutex<bool>>>)> {
-        QueuePolicyEnforcer::new(&self.outward_queue, &self.policy).pop_front()
-    }
-}
-
-#[derive(Clone)]
-pub struct InwardMessageQueueNotifier {
-    signal: Arc<ChgNtfMutex<bool>>
-}
-
-impl InwardMessageQueueNotifier {
-    pub fn new() -> Self {
-        Self {
-            signal: Arc::new(ChgNtfMutex::new(false))
-        }
-    }
-
-    pub fn notify_change(&self) {
-        *self.signal.lock_notify().unwrap() = true;
-    }
-
-    pub fn wait_for_change_timeout(&self, timeout: std::time::Duration) -> bool {
-        let mut signal = self.signal.lock().unwrap();
-        let result = if *signal == true {
-            true
-        } else {
-            signal = self.signal.wait_timeout_on_locked(signal, timeout).unwrap().0;
-            if *signal == true {
-                true
-            } else {
-                false
-            }
-        };
-        *signal = false;
-        result
-    }
-
-    pub fn wait_for_change(&self) -> bool {
-        let mut signal = self.signal.lock().unwrap();
-        if !*signal == true {
-            while !*signal {
-                signal = self.signal.wait_on_locked(signal).unwrap();
-            }
-        };
-        *signal = false;
-        true
-    }
-
-    pub fn take_was_change(&self) -> bool {
-        let mut signal = self.signal.lock().unwrap();
-        let result = *signal;
-        *signal = false;
-        result
-    }
-}
-
-#[derive(Clone)]
-pub struct InwardMessageQueue {
-    inward_queue: Arc<ChgNtfMutex<VecDeque<RawMessage>>>,
-    policy: Option<QueueingPolicy>,
-    notifier: InwardMessageQueueNotifier
-}
-
-impl InwardMessageQueue {
-    pub fn new(notifier: InwardMessageQueueNotifier) -> Self {
-        Self {
-            inward_queue: ChgNtfMutex::new_arc(VecDeque::new()),
-            policy: None,
-            notifier: notifier
-        }
-    }
-
-    pub fn with_policy(self, policy: Option<QueueingPolicy>) -> Self {
-        Self {
-            policy: policy,
-            ..self
-        }
-    }
-
-    pub fn add_to_inward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
-        let result = QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).push_back(message);
-        self.notifier.notify_change();
-        result
-    }
-
-    pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
-        &self,
-        iterator: T,
-    ) -> Result<(), SocketInternalError> {
-        let result = QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).extend(iterator);
-        self.notifier.notify_change();
-        result
-    }
-
-    pub fn receive_async_all(&self) -> Vec<RawMessage> {
-        QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).pop_all()
-    }
-
-    pub fn receive_async_one(&self) -> Option<RawMessage> {
-        QueuePolicyEnforcer::new(&self.inward_queue, &self.policy).pop_front()
-    }
-
-    pub fn receive_one_timeout(&self, timeout: Duration) -> Option<RawMessage> {
-        let mut inward_queue = self.inward_queue.lock_notify().unwrap();
-        match inward_queue.pop_front() {
-            Some(message) => Some(message),
-            None => {
-                let (mut invard_queue, _timeout_handle) = self
-                    .inward_queue
-                    .wait_timeout_on_lock_notified(inward_queue, timeout)
-                    .unwrap();
-                invard_queue.pop_front()
-            }
-        }
-    }
-
-    pub fn receive_one(&self) -> RawMessage {
-        let mut inward_queue = self.inward_queue.lock_notify().unwrap();
-        match inward_queue.pop_front() {
-            Some(message) => message,
-            None => {
-                while inward_queue.is_empty() {  
-                    inward_queue = self
-                        .inward_queue
-                        .wait_on_lock_notified(inward_queue)
-                        .unwrap();
-                }
-                inward_queue.pop_front().unwrap()
-            }
-        }
-    }
-}
-
-// pub struct InwardMessageQueuePeerSide {
-//     queue: InwardMessageQueue,
-//     peer_id: PeerId,
-// }
-
-// impl InwardMessageQueuePeerSide {
-//     pub fn new(queue: InwardMessageQueue, peer_id: PeerId) -> Self {
-//         Self {
-//             queue: queue,
-//             peer_id: peer_id,
-//         }
-//     }
-
-//     pub fn add_to_inward_queue(&self, message: RawMessage) -> Result<(), SocketInternalError> {
-//         self.queue
-//             .add_to_inward_queue(message.apply_peer_id(self.peer_id))
-//     }
-
-//     pub fn extend_to_inward_queue<T: std::iter::Iterator<Item = RawMessage>>(
-//         &self,
-//         iterator: T,
-//     ) -> Result<(), SocketInternalError> {
-//         self.queue
-//             .extend_to_inward_queue(iterator.map(|message| message.apply_peer_id(self.peer_id)))
-//     }
-// }
