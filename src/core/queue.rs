@@ -87,6 +87,8 @@ impl ReceiptState {
             (Self::InQueue, Self::Received) => Ok(state),
             (Self::InQueue, Self::Acknowledged) => Ok(state),
             (Self::Received, Self::Processed) => Ok(state),
+            (Self::Acknowledged, Self::Dropped) => Ok(Self::Acknowledged),
+            (Self::Processed, Self::Dropped) => Ok(Self::Processed),
             (_, Self::Dropped) => Ok(state),
             _ => Err(())
         };
@@ -102,12 +104,6 @@ impl ReceiptInternalData {
     fn queue() -> (SenderReceipt, ReceiverReceipt) { 
         let internals = Self(Arc::new(ChgNtfMutex::new(ReceiptState::InQueue)));
         (SenderReceipt::new(internals.clone()), ReceiverReceipt::new(internals))
-    }
-}
-
-impl Drop for ReceiptInternalData {
-    fn drop(&mut self) {
-        self.0.lock_notify().unwrap().transition(ReceiptState::Dropped);
     }
 }
 
@@ -149,10 +145,10 @@ impl SenderReceipt {
     pub fn wait_processed(&self) -> Result<ReceiptState, ReceiptState> {
         let mut locked = self.0.0.lock().unwrap();
         loop {
-            locked = self.0.0.wait_on_locked(locked).unwrap();
             if let true = locked.has_been_processed()? {
                 return Ok(*locked);
-            } 
+            }
+            locked = self.0.0.wait_on_locked(locked).unwrap();
         }
     }
 
@@ -175,8 +171,12 @@ pub struct ReceiverReceipt(ReceiptInternalData);
 
 impl ReceiverReceipt {
     fn new(internals: ReceiptInternalData) -> Self {
-        internals.0.lock_notify().unwrap().transition(ReceiptState::Received);
         Self(internals)
+    }
+
+    pub fn received(self) -> Self {
+        self.0.0.lock_notify().unwrap().transition(ReceiptState::Received);
+        self
     }
 
     pub fn acnkowledged(self) {
@@ -185,6 +185,12 @@ impl ReceiverReceipt {
 
     pub fn processed(self) {
         self.0.0.lock_notify().unwrap().transition(ReceiptState::Processed);
+    }
+}
+
+impl Drop for ReceiverReceipt {
+    fn drop(&mut self) {
+        self.0.0.lock_notify().unwrap().transition(ReceiptState::Dropped);
     }
 }
 
@@ -319,7 +325,7 @@ impl<T> MessageQueueInternal<T>
         loop {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt, message))
+                    return Ok((receipt.map(|x| x.received()), message))
                 },
                 None => {
                     if locked.senders_all_dropped() {
@@ -356,7 +362,7 @@ impl<T> MessageQueueInternal<T>
         for _ in 0..2 {
             match locked.queue.pop_front() {
                 Some((receipt, message)) => {
-                    return Ok((receipt, message))
+                    return Ok((receipt.map(|x| x.received()), message))
                 },
                 None => {
                     if locked.senders_all_dropped() {
@@ -391,7 +397,7 @@ impl<T> MessageQueueInternal<T>
         let mut locked = self.0.lock_notify().unwrap();
         match locked.queue.pop_front() {
             Some((receipt, message)) => {
-                Ok(Some((receipt, message)))
+                Ok(Some((receipt.map(|x| x.received()), message)))
             },
             None => {
                 if locked.senders_all_dropped() {
@@ -430,7 +436,7 @@ impl<T> MessageQueueInternal<T>
                                                              .drain(..)
                                                              .map(|(receipt, message)| {
                                                                   match receipt {
-                                                                      Some(r) => (Some(r), message),
+                                                                      Some(r) => (Some(r.received()), message),
                                                                       None => (None, message)
                                                                   }
                                                              })

@@ -187,9 +187,10 @@ impl NetworkConnectionPeerManager {
                     let connection = Self::get_message_peer_connection(&mut tables.peer_thread, message.peer_id())?;
                     receipt = connection.send(message)?;
                 }
-                match receipt.wait_processed()? {
-                    ReceiptState::Dropped => Err(SocketInternalError::Disconnected),
-                    _ => Err(SocketInternalError::UnknownInternalError("Sent message has not been processed.".to_string()))
+                match receipt.wait_processed() {
+                    Ok(_) => Ok(()),
+                    Err(ReceiptState::Dropped) => Err(SocketInternalError::Disconnected),
+                    Err(_) => Err(SocketInternalError::UnknownInternalError("Sent message has not been processed.".to_string()))
                 }
             },
             OpFlag::NoWait => {
