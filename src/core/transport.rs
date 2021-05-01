@@ -25,12 +25,12 @@ pub enum TransportMethod {
 /// to establis a connection
 pub trait Transport: Send + Sync {
     /// Send message
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError>;
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError>;
     /// Receive message
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
     /// Close connection to the peer identified by [`PeerIdentification`]
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketError>;
     /// Query the [`PeerId`]s of all the connected peers
@@ -45,14 +45,14 @@ pub trait Transport: Send + Sync {
 /// Trait that every transport layer has to implement that can establish a connection
 pub trait InitiatorTransport: Transport {
     /// Establist connection to peer defined by TransportMethod
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn connect(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
 }
 
 /// # AcceptorTransport
 /// Trait that every transport layer has to implement that can listen for connections
 pub trait AcceptorTransport: Transport {
     /// Listen for connections from peers on the TransportMethod defined
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
 }
 
 /// # BidirectionalTransport

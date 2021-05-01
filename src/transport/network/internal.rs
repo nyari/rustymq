@@ -396,7 +396,7 @@ impl NetworkConnectionManager {
         Stream: NetworkStream,
         Builder: NetworkStreamConnectionBuilder<Stream = Stream>,
     >(
-        &mut self,
+        &self,
         builder: Builder,
         address: NetworkAddress,
     ) -> Result<PeerId, SocketInternalError> {
@@ -404,7 +404,7 @@ impl NetworkConnectionManager {
     }
 
     pub fn send_message(
-        &mut self,
+        &self,
         message: RawMessage,
         flags: OpFlag,
     ) -> Result<(), SocketInternalError> {
@@ -412,14 +412,14 @@ impl NetworkConnectionManager {
     }
 
     pub fn receive_message(
-        &mut self,
+        &self,
         flags: OpFlag,
     ) -> Result<RawMessage, (Option<PeerId>, SocketInternalError)> {
         self.peers.receive_message(flags)
     }
 
     fn close_connection_internal(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketInternalError> {
         self.peers.close_connection(peer_identification)
@@ -427,11 +427,11 @@ impl NetworkConnectionManager {
 }
 
 impl Transport for NetworkConnectionManager {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         SocketInternalError::externalize_result(self.send_message(message, flags))
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.receive_message(flags)
             .map_err(|(peer, err)| (peer, SocketInternalError::externalize_error(err)))
     }
@@ -441,7 +441,7 @@ impl Transport for NetworkConnectionManager {
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketError> {
         SocketInternalError::externalize_result(self.close_connection_internal(peer_identification))
@@ -482,16 +482,16 @@ impl<Builder: NetworkStreamConnectionBuilder> NetworkInitiatorTransport<Builder>
 }
 
 impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTransport<Builder> {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.manager.send(message, flags)
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.manager.receive(flags)
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketError> {
         self.manager.close_connection(peer_identification)
@@ -513,7 +513,7 @@ impl<Builder: NetworkStreamConnectionBuilder> Transport for NetworkInitiatorTran
 impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport
     for NetworkInitiatorTransport<Builder>
 {
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn connect(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         match target {
             TransportMethod::Network(address) => {
                 Ok(Some(self.manager.connect(self.builder.clone(), address)?))
@@ -589,7 +589,7 @@ where
     ConnectionBuilder: NetworkStreamConnectionBuilder<Stream = Listener::Stream>,
 {
     manager: NetworkConnectionManager,
-    listener_thread: Option<thread::JoinHandle<Result<(), SocketInternalError>>>,
+    listener_thread: Mutex<Option<thread::JoinHandle<Result<(), SocketInternalError>>>>,
     stop_semaphore: Semaphore,
     listener_builder: ListenerBuilder,
     connection_builder: ConnectionBuilder,
@@ -608,7 +608,7 @@ where
         let stop_semaphore = Semaphore::new();
         Self {
             manager: NetworkConnectionManager::new(TransportConfiguration::new()),
-            listener_thread: None,
+            listener_thread: Mutex::new(None),
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,
             connection_builder: connection_builder,
@@ -625,7 +625,7 @@ where
         let stop_semaphore = Semaphore::new();
         Self {
             manager: NetworkConnectionManager::new(config.clone()),
-            listener_thread: None,
+            listener_thread: Mutex::new(None),
             stop_semaphore: stop_semaphore,
             listener_builder: listener_builder,
             connection_builder: connection_builder,
@@ -642,16 +642,16 @@ where
     ListenerBuilder: NetworkListenerBuilder<Listener = Listener>,
     ConnectionBuilder: NetworkStreamConnectionBuilder<Stream = Listener::Stream>,
 {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<(), SocketError> {
         self.manager.send(message, flags)
     }
 
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         self.manager.receive(flags)
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<Option<PeerId>, SocketError> {
         self.manager.close_connection(peer_identification)
@@ -677,7 +677,7 @@ where
     ListenerBuilder: NetworkListenerBuilder<Listener = Listener>,
     ConnectionBuilder: NetworkStreamConnectionBuilder<Stream = Listener::Stream>,
 {
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         if let TransportMethod::Network(addr) = target {
             let listener_builder: NetworkConnectionListener<Listener, ConnectionBuilder> =
                 NetworkConnectionListener::bind(
@@ -687,7 +687,7 @@ where
                     self.manager.get_peers(),
                 )?;
             let stop_semaphore = self.stop_semaphore.clone();
-            self.listener_thread = Some(thread::spawn(move || {
+            *self.listener_thread.lock().unwrap() = Some(thread::spawn(move || {
                 listener_builder.main_loop(stop_semaphore)
             }));
             Ok(None)
@@ -707,6 +707,8 @@ where
     fn drop(&mut self) {
         self.stop_semaphore.signal();
         self.listener_thread
+            .lock()
+            .unwrap()
             .take()
             .and_then(|join_handle| Some(join_handle.join()));
     }
