@@ -79,25 +79,24 @@ fn simple_req_rep_ssl_test() {
             ),
         ))
         .unwrap();
-    let replier =
-        model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(
-            transport::network::ssl::StreamConnectionBuilder::new(
-                {
-                    let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
-                    builder.set_verify(SslVerifyMode::NONE);
-                    builder
-                }
-                .build(),
-            ),
-            transport::network::ssl::StreamListenerBuilder::new(Arc::new(|| {
-                let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-                builder.set_private_key(get_private_key().as_ref()).unwrap();
-                builder.set_certificate(get_certificate().as_ref()).unwrap();
+    let replier = model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(
+        transport::network::ssl::StreamConnectionBuilder::new(
+            {
+                let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
                 builder.set_verify(SslVerifyMode::NONE);
-                builder.build()
-            })),
-        ))
-        .unwrap();
+                builder
+            }
+            .build(),
+        ),
+        transport::network::ssl::StreamListenerBuilder::new(Arc::new(|| {
+            let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+            builder.set_private_key(get_private_key().as_ref()).unwrap();
+            builder.set_certificate(get_certificate().as_ref()).unwrap();
+            builder.set_verify(SslVerifyMode::NONE);
+            builder.build()
+        })),
+    ))
+    .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(

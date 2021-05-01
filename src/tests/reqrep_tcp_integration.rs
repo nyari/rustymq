@@ -17,12 +17,11 @@ fn simple_req_rep_tcp_test() {
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let replier =
-        model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
-            transport::network::tcp::StreamConnectionBuilder::new(),
-            transport::network::tcp::StreamListenerBuilder::new(),
-        ))
-        .unwrap();
+    let replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
+        transport::network::tcp::StreamConnectionBuilder::new(),
+        transport::network::tcp::StreamListenerBuilder::new(),
+    ))
+    .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(
@@ -63,12 +62,11 @@ fn stress_simple_req_rep_tcp_test() {
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let replier =
-        model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
-            transport::network::tcp::StreamConnectionBuilder::new(),
-            transport::network::tcp::StreamListenerBuilder::new(),
-        ))
-        .unwrap();
+    let replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
+        transport::network::tcp::StreamConnectionBuilder::new(),
+        transport::network::tcp::StreamListenerBuilder::new(),
+    ))
+    .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(
@@ -137,12 +135,11 @@ fn simple_req_rep_tcp_test_disconnected_before_first_send() {
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let replier =
-        model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
-            transport::network::tcp::StreamConnectionBuilder::new(),
-            transport::network::tcp::StreamListenerBuilder::new(),
-        ))
-        .unwrap();
+    let replier = model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
+        transport::network::tcp::StreamConnectionBuilder::new(),
+        transport::network::tcp::StreamListenerBuilder::new(),
+    ))
+    .unwrap();
 
     replier
         .bind(core::TransportMethod::Network(

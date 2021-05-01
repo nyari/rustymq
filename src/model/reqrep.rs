@@ -298,10 +298,7 @@ where
         Err(SocketError::NotSupportedOperation)
     }
 
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError> {
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.lock().unwrap().close_connection(peer_id)?;
@@ -315,7 +312,9 @@ where
                     .transport
                     .close_connection(PeerIdentification::TransportMethod(method))?)
                 .unwrap();
-                self.tracker.lock().unwrap()
+                self.tracker
+                    .lock()
+                    .unwrap()
                     .close_connection(peer_id)
                     .expect("onnection existance already checked, should not happen");
                 Ok(())
@@ -336,7 +335,9 @@ where
         match self.transport.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker.lock().unwrap()
+                self.tracker
+                    .lock()
+                    .unwrap()
                     .handle_reply_message(message)
                     .map_err(|error| (None, SocketError::from(error)))
             }
@@ -354,14 +355,11 @@ where
         let metadata = request_message.metadata().clone();
         let message = {
             let mut tracker = self.tracker.lock().unwrap();
-            let message_with_peer_id  = tracker.apply_single_peer_if_needed(request_message)?;
+            let message_with_peer_id = tracker.apply_single_peer_if_needed(request_message)?;
             tracker.handle_request_message(message_with_peer_id)
         }?;
 
-        match self.transport.send(
-            message,
-            flags,
-        ) {
+        match self.transport.send(message, flags) {
             Ok(()) => Ok(metadata),
             Err(err) => Err(err),
         }
@@ -420,10 +418,7 @@ where
         self.transport.bind(target)
     }
 
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError> {
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.lock().unwrap().close_connection(peer_id)?;
@@ -437,7 +432,9 @@ where
                     .transport
                     .close_connection(PeerIdentification::TransportMethod(method))?)
                 .unwrap();
-                self.tracker.lock().unwrap()
+                self.tracker
+                    .lock()
+                    .unwrap()
                     .close_connection(peer_id)
                     .expect("Connection existance already checked, should not happen");
                 Ok(())
@@ -471,7 +468,9 @@ where
 {
     fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
         let processed_message = self
-            .tracker.lock().unwrap()
+            .tracker
+            .lock()
+            .unwrap()
             .handle_reply_message(message)?
             .commit_communication_model_id(REPLY_MODELID);
         let message_metadata = processed_message.metadata().clone();

@@ -9,7 +9,7 @@ use core::transport::TransportMethod;
 
 use std::convert::{From, TryFrom};
 use std::string::String;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 /// # Operation flags
 /// Configuration for individual send and receive calls on [`InwardSocket`]s and [`OutwardSocket`]s
@@ -229,10 +229,7 @@ pub trait Socket: Send + Sync {
     /// the self identifier PeerId.
     fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
     /// Close connection to a peer specified by [`PeerIdentification`]
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError>;
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError>;
     /// Close the socket with all its connections
     fn close(self) -> Result<(), SocketError>;
 }
@@ -405,10 +402,7 @@ where
         self.socket.bind(target)
     }
 
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError> {
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         self.socket.close_connection(peer_identification)
     }
 

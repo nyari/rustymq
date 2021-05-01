@@ -132,7 +132,10 @@ where
             .transport
             .connect(target)?
             .expect("Transport did not provide peer id");
-        self.tracker.lock().unwrap().accept_new_peer(peerid.clone())?;
+        self.tracker
+            .lock()
+            .unwrap()
+            .accept_new_peer(peerid.clone())?;
         Ok(Some(peerid))
     }
 
@@ -141,10 +144,7 @@ where
         Err(SocketError::NotSupportedOperation)
     }
 
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError> {
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
                 self.tracker.lock().unwrap().close_connection(peer_id)?;
@@ -158,7 +158,9 @@ where
                     .transport
                     .close_connection(PeerIdentification::TransportMethod(method))?)
                 .unwrap();
-                self.tracker.lock().unwrap()
+                self.tracker
+                    .lock()
+                    .unwrap()
                     .close_connection(peer_id)
                     .expect("Connection existance already checked, should not happen");
                 Ok(())
@@ -179,7 +181,9 @@ where
         match self.transport.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker.lock().unwrap()
+                self.tracker
+                    .lock()
+                    .unwrap()
                     .check_peer_connected(
                         message.peer_id().ok_or((None, SocketError::UnknownPeer))?,
                     )
@@ -221,10 +225,7 @@ where
         self.transport.bind(target)
     }
 
-    fn close_connection(
-        &self,
-        peer_identification: PeerIdentification,
-    ) -> Result<(), SocketError> {
+    fn close_connection(&self, peer_identification: PeerIdentification) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(_peer_id) => {
                 self.transport
