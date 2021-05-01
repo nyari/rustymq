@@ -49,6 +49,7 @@ use core::socket::{
 use core::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 const REQUEST_MODELID: u16 = 0xFFF0;
 const REPLY_MODELID: u16 = 0xFFF1;
@@ -246,7 +247,7 @@ fn validate_transport_configuration<T: Transport>(
 /// specified in the [`MessageMetadata`] in order to know which connection to send the message to.
 pub struct RequestSocket<T: InitiatorTransport> {
     transport: T,
-    tracker: ConnectionTracker,
+    tracker: Mutex<ConnectionTracker>,
 }
 
 impl<T> RequestSocket<T>
@@ -258,12 +259,12 @@ where
         validate_transport_configuration(&transport)?;
         Ok(Self {
             transport: transport,
-            tracker: ConnectionTracker::new(),
+            tracker: Mutex::new(ConnectionTracker::new()),
         })
     }
 
     fn handle_received_message_model_id(
-        &mut self,
+        &self,
         message: &RawMessage,
     ) -> Result<(), (Option<PeerId>, SocketError)> {
         if message.communication_model_id().unwrap() == REPLY_MODELID {
@@ -284,26 +285,26 @@ impl<T> Socket for RequestSocket<T>
 where
     T: InitiatorTransport,
 {
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn connect(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         let peer_id = self
             .transport
             .connect(target)?
             .expect("Transport did not provide peer id");
-        self.tracker.accept_peer(peer_id);
+        self.tracker.lock().unwrap().accept_peer(peer_id);
         Ok(Some(peer_id))
     }
 
-    fn bind(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn bind(&self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         Err(SocketError::NotSupportedOperation)
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
-                self.tracker.close_connection(peer_id)?;
+                self.tracker.lock().unwrap().close_connection(peer_id)?;
                 self.transport
                     .close_connection(peer_identification)
                     .expect("Connection existance already checked, should not happen");
@@ -314,7 +315,7 @@ where
                     .transport
                     .close_connection(PeerIdentification::TransportMethod(method))?)
                 .unwrap();
-                self.tracker
+                self.tracker.lock().unwrap()
                     .close_connection(peer_id)
                     .expect("onnection existance already checked, should not happen");
                 Ok(())
@@ -331,11 +332,11 @@ impl<T> InwardSocket for RequestSocket<T>
 where
     T: InitiatorTransport,
 {
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         match self.transport.receive(flags) {
             Ok(message) => {
                 self.handle_received_message_model_id(&message)?;
-                self.tracker
+                self.tracker.lock().unwrap()
                     .handle_reply_message(message)
                     .map_err(|error| (None, SocketError::from(error)))
             }
@@ -348,13 +349,17 @@ impl<T> OutwardSocket for RequestSocket<T>
 where
     T: InitiatorTransport,
 {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
         let request_message = message.commit_communication_model_id(REQUEST_MODELID);
         let metadata = request_message.metadata().clone();
+        let message = {
+            let mut tracker = self.tracker.lock().unwrap();
+            let message_with_peer_id  = tracker.apply_single_peer_if_needed(request_message)?;
+            tracker.handle_request_message(message_with_peer_id)
+        }?;
+
         match self.transport.send(
-            self.tracker.handle_request_message(
-                self.tracker.apply_single_peer_if_needed(request_message)?,
-            )?,
+            message,
             flags,
         ) {
             Ok(()) => Ok(metadata),
@@ -370,7 +375,7 @@ impl<T> BidirectionalSocket for RequestSocket<T> where T: InitiatorTransport {}
 /// incoming connections from several different clients
 pub struct ReplySocket<T: AcceptorTransport> {
     transport: T,
-    tracker: ConnectionTracker,
+    tracker: Mutex<ConnectionTracker>,
 }
 
 impl<T> ReplySocket<T>
@@ -381,12 +386,12 @@ where
         validate_transport_configuration(&transport)?;
         Ok(Self {
             transport: transport,
-            tracker: ConnectionTracker::new(),
+            tracker: Mutex::new(ConnectionTracker::new()),
         })
     }
 
     pub fn handle_received_message_model_id(
-        &mut self,
+        &self,
         message: &RawMessage,
     ) -> Result<(), (Option<PeerId>, SocketError)> {
         if message.communication_model_id().unwrap() == REQUEST_MODELID {
@@ -407,21 +412,21 @@ impl<T> Socket for ReplySocket<T>
 where
     T: AcceptorTransport,
 {
-    fn connect(&mut self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn connect(&self, _target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         Err(SocketError::NotSupportedOperation)
     }
 
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+    fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
         self.transport.bind(target)
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<(), SocketError> {
         match peer_identification {
             PeerIdentification::PeerId(peer_id) => {
-                self.tracker.close_connection(peer_id)?;
+                self.tracker.lock().unwrap().close_connection(peer_id)?;
                 self.transport
                     .close_connection(peer_identification)
                     .expect("Connection existance already checked, should not happen");
@@ -432,7 +437,7 @@ where
                     .transport
                     .close_connection(PeerIdentification::TransportMethod(method))?)
                 .unwrap();
-                self.tracker
+                self.tracker.lock().unwrap()
                     .close_connection(peer_id)
                     .expect("Connection existance already checked, should not happen");
                 Ok(())
@@ -449,11 +454,12 @@ impl<T> InwardSocket for ReplySocket<T>
 where
     T: AcceptorTransport,
 {
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
         let message = self.transport.receive(flags)?;
         self.handle_received_message_model_id(&message)?;
-        self.tracker.accept_peer(message.peer_id().unwrap().clone());
-        self.tracker
+        let mut tracker = self.tracker.lock().unwrap();
+        tracker.accept_peer(message.peer_id().unwrap().clone());
+        tracker
             .handle_request_message(message)
             .map_err(|error| (None, SocketError::from(error)))
     }
@@ -463,9 +469,9 @@ impl<T> OutwardSocket for ReplySocket<T>
 where
     T: AcceptorTransport,
 {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
         let processed_message = self
-            .tracker
+            .tracker.lock().unwrap()
             .handle_reply_message(message)?
             .commit_communication_model_id(REPLY_MODELID);
         let message_metadata = processed_message.metadata().clone();

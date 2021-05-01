@@ -12,12 +12,12 @@ use std::sync::{Arc, Mutex};
 
 #[test]
 fn simple_req_rep_tcp_test() {
-    let mut requestor =
+    let requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let mut replier =
+    let replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),
@@ -58,12 +58,12 @@ fn simple_req_rep_tcp_test() {
 
 #[test]
 fn stress_simple_req_rep_tcp_test() {
-    let mut requestor =
+    let requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let mut replier =
+    let replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),
@@ -132,12 +132,12 @@ fn stress_simple_req_rep_tcp_test() {
 
 #[test]
 fn simple_req_rep_tcp_test_disconnected_before_first_send() {
-    let mut requestor =
+    let requestor =
         model::reqrep::RequestSocket::new(transport::network::tcp::InitiatorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
         ))
         .unwrap();
-    let mut replier =
+    let replier =
         model::reqrep::ReplySocket::new(transport::network::tcp::AcceptorTransport::new(
             transport::network::tcp::StreamConnectionBuilder::new(),
             transport::network::tcp::StreamListenerBuilder::new(),

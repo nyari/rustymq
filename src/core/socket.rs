@@ -6,12 +6,10 @@ use core::message::{
 };
 use core::queue::{MessageQueueError, ReceiptState};
 use core::transport::TransportMethod;
-use core::util;
 
 use std::convert::{From, TryFrom};
-use std::ops::Deref;
 use std::string::String;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc};
 
 /// # Operation flags
 /// Configuration for individual send and receive calls on [`InwardSocket`]s and [`OutwardSocket`]s
@@ -226,13 +224,13 @@ where
 pub trait Socket: Send + Sync {
     /// Connect to a new peer specified by the parameter. The result can contain the PeerId which should be used
     /// in [`MessageMetadata`] in future transactions to identify the peer
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn connect(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
     /// Bind to an interface to listen for connections given by the first parameter. The result can contain a PeerId that will contain
     /// the self identifier PeerId.
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
+    fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError>;
     /// Close connection to a peer specified by [`PeerIdentification`]
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<(), SocketError>;
     /// Close the socket with all its connections
@@ -244,11 +242,11 @@ pub trait Socket: Send + Sync {
 /// There can be several implementations of it depending on the communication model used
 pub trait OutwardSocket: Socket {
     /// Send a raw message
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError>;
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError>;
 
     /// Send a typed message. Requires T to implement the SerializableMessagePayload trait
     fn send_typed<T>(
-        &mut self,
+        &self,
         message: TypedMessage<T>,
         flags: OpFlag,
     ) -> Result<MessageMetadata, SendTypedError<T>>
@@ -270,10 +268,10 @@ pub trait OutwardSocket: Socket {
 /// There can be several implementations of it depending on the communication model used
 pub trait InwardSocket: Socket {
     /// Receive a raw message
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)>;
 
     /// Receive a typed message. Requires T to implement the SerializableMessagePayload trait
-    fn receive_typed<T>(&mut self, flags: OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>>
+    fn receive_typed<T>(&self, flags: OpFlag) -> Result<TypedMessage<T>, ReceiveTypedError<T>>
     where
         T: SerializableMessagePayload,
     {
@@ -294,7 +292,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket {
     /// Execute a query (send and then receive) with a raw message
     /// This does not guaratee that the response is for the same message that was sent
     fn query(
-        &mut self,
+        &self,
         message: RawMessage,
         send_flags: OpFlag,
         recieve_flags: OpFlag,
@@ -306,7 +304,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket {
 
     /// Execute a query (send and then receive) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
     fn query_typed<S, R>(
-        &mut self,
+        &self,
         message: TypedMessage<S>,
         send_flags: OpFlag,
         recieve_flags: OpFlag,
@@ -326,7 +324,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket {
 
     /// Respont to a query (receive and then reply) with a raw message
     fn respond<T: Fn(RawMessage) -> RawMessage>(
-        &mut self,
+        &self,
         receive_flags: OpFlag,
         send_flags: OpFlag,
         processor: T,
@@ -341,7 +339,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket {
 
     /// Respond to a query (receive and then reply) with a typed message. Requires S and R to be convertibe to implement [`SerializableMessagePayload`]
     fn respond_typed<R, S, Q: Fn(TypedMessage<R>) -> TypedMessage<S>>(
-        &mut self,
+        &self,
         receive_flags: OpFlag,
         send_flags: OpFlag,
         processor: Q,
@@ -369,7 +367,7 @@ pub struct ArcSocket<T>
 where
     T: Socket,
 {
-    socket: Arc<Mutex<T>>,
+    socket: Arc<T>,
 }
 
 impl<T> Clone for ArcSocket<T>
@@ -390,23 +388,8 @@ where
     /// Create a new ArcSocket with an already constructed socket
     pub fn new(socket: T) -> Self {
         Self {
-            socket: Arc::new(Mutex::new(socket)),
+            socket: Arc::new(socket),
         }
-    }
-
-    /// Get a mutex guard for the internal socket
-    pub fn lock_ref<'a>(&'a self) -> MutexGuard<'a, T> {
-        self.socket.lock().unwrap()
-    }
-
-    /// Perform operations on internal socket directly through a closure
-    pub fn direct<U, F: Fn(&T) -> U>(&self, func: F) -> U {
-        func(self.socket.lock().unwrap().deref())
-    }
-
-    /// Perform mutating operations on internal socket directly through a closure
-    pub fn direct_mut<U, F: FnMut(&T) -> U>(&mut self, mut func: F) -> U {
-        func(self.socket.lock().unwrap().deref())
     }
 }
 
@@ -414,19 +397,19 @@ impl<T> Socket for ArcSocket<T>
 where
     T: Socket,
 {
-    fn connect(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
-        self.lock_ref().connect(target)
+    fn connect(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        self.socket.connect(target)
     }
 
-    fn bind(&mut self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
-        self.lock_ref().bind(target)
+    fn bind(&self, target: TransportMethod) -> Result<Option<PeerId>, SocketError> {
+        self.socket.bind(target)
     }
 
     fn close_connection(
-        &mut self,
+        &self,
         peer_identification: PeerIdentification,
     ) -> Result<(), SocketError> {
-        self.lock_ref().close_connection(peer_identification)
+        self.socket.close_connection(peer_identification)
     }
 
     fn close(self) -> Result<(), SocketError> {
@@ -438,17 +421,8 @@ impl<T> InwardSocket for ArcSocket<T>
 where
     T: InwardSocket,
 {
-    fn receive(&mut self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
-        match flags {
-            OpFlag::Wait => util::thread::poll_mut(std::time::Duration::from_millis(1), || {
-                match self.lock_ref().receive(OpFlag::NoWait) {
-                    Ok(message) => Some(Ok(message)),
-                    Err((_, SocketError::Timeout)) => None,
-                    Err(err) => Some(Err(err)),
-                }
-            }),
-            OpFlag::NoWait => self.lock_ref().receive(flags),
-        }
+    fn receive(&self, flags: OpFlag) -> Result<RawMessage, (Option<PeerId>, SocketError)> {
+        self.socket.receive(flags)
     }
 }
 
@@ -456,8 +430,8 @@ impl<T> OutwardSocket for ArcSocket<T>
 where
     T: OutwardSocket,
 {
-    fn send(&mut self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        self.lock_ref().send(message, flags)
+    fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
+        self.socket.send(message, flags)
     }
 }
 

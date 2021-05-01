@@ -67,7 +67,7 @@ PJT+e7IFIhf2fUJQOB++xmo=
 
 #[test]
 fn simple_req_rep_ssl_test() {
-    let mut requestor =
+    let requestor =
         model::reqrep::RequestSocket::new(transport::network::ssl::InitiatorTransport::new(
             transport::network::ssl::StreamConnectionBuilder::new(
                 {
@@ -79,7 +79,7 @@ fn simple_req_rep_ssl_test() {
             ),
         ))
         .unwrap();
-    let mut replier =
+    let replier =
         model::reqrep::ReplySocket::new(transport::network::ssl::AcceptorTransport::new(
             transport::network::ssl::StreamConnectionBuilder::new(
                 {
