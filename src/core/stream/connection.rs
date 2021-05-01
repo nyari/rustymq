@@ -1,5 +1,5 @@
 use core::message::{Message, RawMessage, PeerId};
-use core::queue::{MessageQueueSender, MessageQueueReceiver, SenderReceipt};
+use core::queue::{MessageQueueSender, MessageQueueReceiver, SenderReceipt, MessageQueueError};
 use core::socket::SocketInternalError;
 use core::stream;
 use core::util::thread::{Semaphore, Sleeper};
@@ -8,6 +8,7 @@ use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 use std::io;
 use std::thread;
 use std::time::Duration;
+use std::collections::{VecDeque};
 
 const BUFFER_BATCH_SIZE: usize = 2048;
 
@@ -42,7 +43,8 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     writer: stream::RawMessageWriter,
     outward_queue: MessageQueueReceiver<RawMessage>,
     inward_queue: MessageQueueSender<RawMessage>,
-    peer_id: PeerId
+    peer_id: PeerId,
+    last_received: VecDeque<RawMessage>,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
@@ -59,7 +61,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             writer: stream::RawMessageWriter::new_empty(),
             outward_queue: outward_queue,
             inward_queue: inward_queue,
-            peer_id: peer_id
+            peer_id: peer_id,
+            last_received: VecDeque::new(),
         }
     }
 
@@ -92,7 +95,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         match self.proceed_sending() {
             Ok(()) => Ok(ReadWriteStremConnectionState::Busy),
             Err(stream::State::Empty) => {
-                if let Err(stream::State::Empty) = self.dequeue_next_outgoing_message_tro_writer() {
+                if let Err(stream::State::Empty) = self.dequeue_next_outgoing_message_to_writer() {
                     Ok(ReadWriteStremConnectionState::Free)
                 } else {
                     Ok(ReadWriteStremConnectionState::Busy)
@@ -104,7 +107,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     }
 
     /// Take message from output queue and add it to [`stream::RawMessageWriter`]
-    fn dequeue_next_outgoing_message_tro_writer(&mut self) -> Result<(), stream::State> {
+    fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
         match self.outward_queue.receive_async_with_receipt() {
             Ok(Some((Some(receipt), message))) => Ok(self.writer =
                 stream::RawMessageWriter::new_with_receipt(
@@ -127,9 +130,24 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
 
     /// Handle reading a chunk of data from [`io::Read`] with [`stream::RawMessageReader`]
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
-        let messages = self.reader.read_into(&mut self.stream)?;
-        for message in messages.into_iter() {
-            self.inward_queue.send(message.apply_peer_id(self.peer_id) ).map_err(|err| stream::State::Stream(err.into()))?
+        if self.last_received.is_empty() {
+            let messages = self.reader.read_into(&mut self.stream)?;
+            let peer_id = self.peer_id.clone();
+            self.last_received.extend(messages.into_iter().map(|msg| msg.apply_peer_id(peer_id)));
+        }
+
+        while !self.last_received.is_empty() {
+            match self.inward_queue.send_unless_full(self.last_received.pop_front().unwrap()) {
+                Ok(_) => (),
+                Err((MessageQueueError::QueueFull, message)) => {
+                    self.last_received.push_front(message);
+                    return Ok(())
+                },
+                Err((err, message)) => {
+                    self.last_received.push_front(message);
+                    return Err(stream::State::Stream(err.into()))
+                } 
+            }
         }
         Ok(())
     }

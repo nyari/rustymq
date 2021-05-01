@@ -23,6 +23,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use crate::core::util;
+
 fn query_acceptor_thread_default_duration_backoff(
 ) -> DurationBackoffWithDebounce<LinearDurationBackoff> {
     DurationBackoffWithDebounce::new(
@@ -178,7 +180,7 @@ impl NetworkConnectionPeerManager {
         message: RawMessage,
         flags: OpFlag,
     ) -> Result<(), SocketInternalError> {
-        //self.handle_peer_error(message.peer_id().unwrap().clone())?;
+        self.handle_peer_error(&message.peer_id().unwrap())?;
         match flags {
             OpFlag::Wait => {
                 let receipt;
@@ -198,6 +200,22 @@ impl NetworkConnectionPeerManager {
                 let connection = Self::get_message_peer_connection(&mut tables.peer_thread, message.peer_id())?;
                 connection.send_async(message)
             }
+        }
+    }
+
+    fn handle_peer_error(&self, peer_id: &PeerId) -> Result<(), SocketInternalError> {
+        let result = {
+            let mut tables = self.tables.lock().unwrap();
+            let peer = tables.peer_thread.get_mut(peer_id).ok_or(SocketInternalError::UnknownPeer)?;
+            peer.check_worker_state()
+        };
+
+        match result {
+            Err(err) => {
+                self.close_connection(PeerIdentification::PeerId(peer_id.clone())).unwrap();
+                Err(err)
+            }
+            Ok(_) => Ok(())
         }
     }
 
@@ -228,7 +246,12 @@ impl NetworkConnectionPeerManager {
         match flags {
             OpFlag::Wait => match self.inward_queue.receive() {
                 Ok(message) => Ok(message),
-                Err(MessageQueueError::SendersAllDropped) => {self.handle_next_error()?; Err((None, SocketInternalError::Timeout))},
+                Err(MessageQueueError::SendersAllDropped) => {
+                    loop {
+                        let () = self.handle_next_error()?;
+                        util::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                },
                 _ => panic!("Unqueueing resulted in unhandleable error")
             },
             OpFlag::NoWait => match self.inward_queue.receive_async() {

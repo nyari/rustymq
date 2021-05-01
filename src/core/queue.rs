@@ -478,6 +478,19 @@ impl<T> MessageQueueInternal<T>
         }
     }
 
+    fn send_unless_full(&self, message: T) -> Result<(), (MessageQueueError, T)> {
+        let mut locked = self.0.lock_notify().unwrap();
+        if locked.receivers_all_dropped() {
+            return Err((MessageQueueError::ReceiversAllDropped, message))
+        }
+        if !locked.is_queue_full() {
+            locked.queue.push_back((None, message));
+            Ok(())
+        } else {
+            Err((MessageQueueError::QueueFull, message))
+        }
+    }
+
     fn send_with_receipt(&self, message: T) -> Result<SenderReceipt, MessageQueueError> {
         let mut locked = self.0.lock_notify().unwrap();
 
@@ -504,6 +517,22 @@ impl<T> MessageQueueInternal<T>
                 }
             }
             locked = self.0.wait_on_lock_notified(locked).unwrap();
+        }
+    }
+
+    fn send_with_receipt_unless_full(&self, message: T) -> Result<SenderReceipt, (MessageQueueError, T)> {
+        let mut locked = self.0.lock_notify().unwrap();
+
+        let (sender_receipt, receiver_receipt) = ReceiptInternalData::queue();
+        if locked.receivers_all_dropped() {
+            return Err((MessageQueueError::ReceiversAllDropped, message))
+        }
+
+        if !locked.is_queue_full() {
+            locked.queue.push_back((Some(receiver_receipt), message));
+            Ok(sender_receipt)
+        } else {
+            Err((MessageQueueError::QueueFull, message))
         }
     }
 }
@@ -598,8 +627,16 @@ impl<T> MessageQueueSender<T>
         self.0.send(message)
     }
 
+    pub fn send_unless_full(&self, message: T) -> Result<(), (MessageQueueError, T)> {
+        self.0.send_unless_full(message)
+    }
+
     pub fn send_with_receipt(&self, message: T) -> Result<SenderReceipt, MessageQueueError> {
         self.0.send_with_receipt(message)
+    }
+
+    pub fn send_with_receipt_unless_full(&self, message: T) -> Result<SenderReceipt, (MessageQueueError, T)> {
+        self.0.send_with_receipt_unless_full(message)
     }
 }
 
