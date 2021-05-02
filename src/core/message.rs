@@ -14,6 +14,8 @@ use std::ops::{Deref, DerefMut};
 pub use core::serializer::{Buffer, BufferSlice};
 use core::util::Identifier;
 
+const MESSAGE_METADATA_VERSION: u8 = 0u8;
+
 /// # Multipart message part identifier
 /// Enum for tracking multipart messages
 /// ## Description
@@ -804,6 +806,7 @@ impl Serializable for Part {
 impl Serializable for MessageMetadata {
     #[inline]
     fn serialize<T: Serializer>(&self, serializer: &mut T) {
+        serializer.serialize(&MESSAGE_METADATA_VERSION);
         serializer.serialize(&self.messageid);
         serializer.serialize(&self.conversationid);
         serializer.serialize(&self.modelid);
@@ -812,6 +815,9 @@ impl Serializable for MessageMetadata {
 
     #[inline]
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
+        if deserializer.deserialize::<u8>()? != MESSAGE_METADATA_VERSION {
+            panic!("Incorrect message metadata version");
+        }
         Ok(Self {
             messageid: deserializer.deserialize()?,
             conversationid: deserializer.deserialize()?,
