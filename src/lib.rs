@@ -20,9 +20,9 @@
 //!                     InwardSocket, OutwardSocket, BidirectionalSocket};
 //!
 //! fn main() {
-//!     let mut requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
-//!     let mut replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
-//!                                                                    tcp::StreamListenerBuilder::new())).unwrap();
+//!     let requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
+//!     let replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
+//!                                                                tcp::StreamListenerBuilder::new())).unwrap();
 //!     
 //!     replier.bind(rustymq::core::TransportMethod::Network(rustymq::core::NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();
 //!     requestor.connect(rustymq::core::TransportMethod::Network(rustymq::core::NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();

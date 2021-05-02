@@ -12,8 +12,9 @@
 //! use rustymq::transport::network::tcp;
 //! # fn main() {
 //!
-//! let mut replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new())).unwrap();
-//! let mut requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
+//! let replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
+//!                                                            tcp::StreamListenerBuilder::new())).unwrap();
+//! let requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
 //!
 //! replier.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
 //! requestor.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));

@@ -12,9 +12,10 @@
 //! use rustymq::transport::network::tcp;
 //! # fn main() {
 //!
-//! let mut publisher = PublisherSocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(), tcp::StreamListenerBuilder::new()));
-//! let mut subscriber1 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
-//! let mut subscriber2 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! let publisher = PublisherSocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
+//!                                                                  tcp::StreamListenerBuilder::new()));
+//! let subscriber1 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
+//! let subscriber2 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
 //!
 //! publisher.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
 //! subscriber1.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));

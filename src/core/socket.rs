@@ -33,7 +33,7 @@ pub enum SocketError {
     UnrelatedConversation,
     /// The specified conversation part in the [`MessageMetadata`] is not known by the socket
     UnrelatedConversationPart,
-    /// The internal gueue in [`Socket`] or [`Transport`] has reached its limit
+    /// The internal gueue in [`Socket`] or Transport has reached its limit
     QueueDepthReached,
     /// Integrity checks on transport layer failed
     TransportIntegrityError,
