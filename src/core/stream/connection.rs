@@ -126,7 +126,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
                     }
                     Ok(None) => {
                         self.writer = stream::RawMessageWriter::new(transport_receipt, BUFFER_BATCH_SIZE);
-                        Err(stream::State::Empty)
+                        Err(stream::State::Remainder)
                     },
                     Err(err) => Err(stream::State::Stream(err.into())),
                 }
