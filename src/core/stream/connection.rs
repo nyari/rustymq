@@ -117,8 +117,19 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     /// Take message from output queue and add it to [`stream::RawMessageWriter`]
     fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
         match self.receipt_queue.pop_front() {
-            Some(receipt) => {
-                Ok(self.writer = stream::RawMessageWriter::new(receipt, BUFFER_BATCH_SIZE))
+            Some(transport_receipt) => {
+                match self.outward_queue.receive_async_with_receipt() {
+                    Ok(Some((Some(receipt), message))) => Ok(self.writer =
+                        stream::RawMessageWriter::new_with_receipt(self.tracker.head_message_and_receipt(message, transport_receipt.into_parts().0), BUFFER_BATCH_SIZE, receipt)),
+                    Ok(Some((None, message))) => {
+                        Ok(self.writer = stream::RawMessageWriter::new(self.tracker.head_message_and_receipt(message, transport_receipt.into_parts().0), BUFFER_BATCH_SIZE))
+                    }
+                    Ok(None) => {
+                        self.writer = stream::RawMessageWriter::new(transport_receipt, BUFFER_BATCH_SIZE);
+                        Err(stream::State::Empty)
+                    },
+                    Err(err) => Err(stream::State::Stream(err.into())),
+                }
             },
             None => {
                 match self.outward_queue.receive_async_with_receipt() {

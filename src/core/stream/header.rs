@@ -7,6 +7,7 @@ pub enum HeaderOperation {
     Payload(RawMessage),
     Heartbeat,
     Receipt,
+    ReceiptWithNextPayload(Header, RawMessage)
 }
 
 impl Serializable for HeaderOperation {
@@ -22,6 +23,11 @@ impl Serializable for HeaderOperation {
             HeaderOperation::Receipt => {
                 serializer.serialize(&2u8);
             }
+            HeaderOperation::ReceiptWithNextPayload(header, message) => {
+                serializer.serialize(&3u8);
+                serializer.serialize(header);
+                serializer.serialize(message);
+            }
         }
     }
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
@@ -29,6 +35,7 @@ impl Serializable for HeaderOperation {
             0u8 => Ok(HeaderOperation::Payload(deserializer.deserialize::<RawMessage>()?)),
             1u8 => Ok(HeaderOperation::Heartbeat),
             2u8 => Ok(HeaderOperation::Receipt),
+            3u8 => Ok(HeaderOperation::ReceiptWithNextPayload(deserializer.deserialize::<Header>()?, deserializer.deserialize::<RawMessage>()?)),
             _ => Err(serializer::Error::DemarshallingFailed)
         }
     }
