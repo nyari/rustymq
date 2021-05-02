@@ -21,6 +21,8 @@ fn query_thread_default_duration_backoff() -> DurationBackoffWithDebounce<Linear
     )
 }
 
+const HEARBEAT_COOLOFF_DURATION: Duration = Duration::from_secs(5);
+
 #[derive(Debug)]
 pub enum ReadWriteStremConnectionState {
     Busy,
@@ -159,6 +161,11 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         self.writer.write_into(&mut self.stream)
     }
 
+    // Queue a hearbeat signal to check connection integrity
+    fn send_hearbeat(&mut self) {
+        self.receipt_queue.push_back(self.tracker.hearbeat_message());
+    }
+
     /// Handle reading a chunk of data from [`io::Read`] with [`stream::RawMessageReader`]
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         if self.last_received.is_empty() {
@@ -211,20 +218,25 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnectionWorker<S> {
 
     pub fn main_loop(mut self, stop_semaphore: Semaphore) -> Result<(), SocketInternalError> {
         let mut sleeper = Sleeper::new(query_thread_default_duration_backoff());
+        let mut slept_total = Duration::from_micros(0);
         loop {
             loop {
                 let receiving = self.stream.process_receiving()?;
                 let sending = self.stream.process_sending()?;
                 if receiving.is_free() && sending.is_free() {
+                    if slept_total > HEARBEAT_COOLOFF_DURATION {
+                        self.stream.send_hearbeat();
+                    }
                     break;
                 } else {
                     sleeper.reset();
+                    slept_total = Duration::from_millis(0);
                 }
             }
             if stop_semaphore.is_signaled() {
                 return Ok(());
             }
-            sleeper.sleep();
+            slept_total += sleeper.sleep();
         }
     }
 }

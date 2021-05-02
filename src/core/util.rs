@@ -247,8 +247,10 @@ pub mod thread {
         }
 
         /// Sleep the current thread according to the next state of the backoff algorithm
-        pub fn sleep(&mut self) {
-            sleep(self.backoff.step())
+        pub fn sleep(&mut self) -> std::time::Duration {
+            let dur = self.backoff.step();
+            sleep(dur);
+            dur
         }
 
         /// Reset the internal backoff algorithm
@@ -290,7 +292,7 @@ pub mod thread {
             if let Some(result) = operation() {
                 return result;
             }
-            sleeper.sleep()
+            sleeper.sleep();
         }
     }
 
@@ -304,7 +306,7 @@ pub mod thread {
             if let Some(result) = operation() {
                 return result;
             }
-            sleeper.sleep()
+            sleeper.sleep();
         }
     }
 

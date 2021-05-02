@@ -28,6 +28,13 @@ impl Tracker {
         }
     }
 
+    pub fn hearbeat_message(&mut self) -> HeadedMessage {
+        let sequence = self.next_sequence();
+        self.outward_track
+            .push_back(Tracked(sequence, self.begin_instant.elapsed()));
+        HeadedMessage::new(Header::new(sequence), HeaderOperation::Heartbeat)
+    }
+
     pub fn head_message(&mut self, message: RawMessage) -> HeadedMessage {
         let sequence = self.next_sequence();
         self.outward_track
