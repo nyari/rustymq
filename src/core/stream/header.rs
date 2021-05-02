@@ -1,9 +1,6 @@
 use core::message::{RawMessage};
 use core::serializer::{Serializable, Serializer, Deserializer};
 use core::serializer;
-
-use rand::seq;
-
 const STREAM_HEADER_VERSION:u8 = 0u8;
 
 pub enum HeaderOperation {
