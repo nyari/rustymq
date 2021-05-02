@@ -6,6 +6,8 @@ mod connection;
 mod reader;
 mod util;
 mod writer;
+mod header;
+mod tracker;
 
 pub use self::connection::*;
 pub use self::reader::*;
