@@ -2,6 +2,8 @@ use core::message::{Message, PeerId, RawMessage};
 use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, SenderReceipt};
 use core::socket::SocketInternalError;
 use core::stream;
+use core::stream::header::HeadedMessage;
+use core::stream::tracker::Tracker;
 use core::util::thread::{Semaphore, Sleeper};
 use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
@@ -45,6 +47,8 @@ pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     inward_queue: MessageQueueSender<RawMessage>,
     peer_id: PeerId,
     last_received: VecDeque<RawMessage>,
+    receipt_queue: VecDeque<HeadedMessage>,
+    tracker: Tracker,
 }
 
 impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
@@ -63,6 +67,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
             inward_queue: inward_queue,
             peer_id: peer_id,
             last_received: VecDeque::new(),
+            receipt_queue: VecDeque::new(),
+            tracker: Tracker::new(),
         }
     }
 
@@ -110,14 +116,41 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
 
     /// Take message from output queue and add it to [`stream::RawMessageWriter`]
     fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
-        match self.outward_queue.receive_async_with_receipt() {
-            Ok(Some((Some(receipt), message))) => Ok(self.writer =
-                stream::RawMessageWriter::new_with_receipt(message, BUFFER_BATCH_SIZE, receipt)),
-            Ok(Some((None, message))) => {
-                Ok(self.writer = stream::RawMessageWriter::new(message, BUFFER_BATCH_SIZE))
-            }
-            Ok(None) => Err(stream::State::Empty),
-            Err(err) => Err(stream::State::Stream(err.into())),
+        match self.receipt_queue.pop_front() {
+            Some(transport_receipt) => match self.outward_queue.receive_async_with_receipt() {
+                Ok(Some((Some(receipt), message))) => Ok(self.writer =
+                    stream::RawMessageWriter::new_with_receipt(
+                        self.tracker
+                            .head_message_and_receipt(message, transport_receipt.into_parts().0),
+                        BUFFER_BATCH_SIZE,
+                        receipt,
+                    )),
+                Ok(Some((None, message))) => Ok(self.writer = stream::RawMessageWriter::new(
+                    self.tracker
+                        .head_message_and_receipt(message, transport_receipt.into_parts().0),
+                    BUFFER_BATCH_SIZE,
+                )),
+                Ok(None) => {
+                    self.writer =
+                        stream::RawMessageWriter::new(transport_receipt, BUFFER_BATCH_SIZE);
+                    Err(stream::State::Remainder)
+                }
+                Err(err) => Err(stream::State::Stream(err.into())),
+            },
+            None => match self.outward_queue.receive_async_with_receipt() {
+                Ok(Some((Some(receipt), message))) => Ok(self.writer =
+                    stream::RawMessageWriter::new_with_receipt(
+                        self.tracker.head_message(message),
+                        BUFFER_BATCH_SIZE,
+                        receipt,
+                    )),
+                Ok(Some((None, message))) => Ok(self.writer = stream::RawMessageWriter::new(
+                    self.tracker.head_message(message),
+                    BUFFER_BATCH_SIZE,
+                )),
+                Ok(None) => Err(stream::State::Empty),
+                Err(err) => Err(stream::State::Stream(err.into())),
+            },
         }
     }
 
@@ -131,8 +164,16 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         if self.last_received.is_empty() {
             let messages = self.reader.read_into(&mut self.stream)?;
             let peer_id = self.peer_id.clone();
-            self.last_received
-                .extend(messages.into_iter().map(|msg| msg.apply_peer_id(peer_id)));
+            for headed_message in messages.into_iter() {
+                let (message_opt, response_opt) =
+                    self.tracker.unwrap_incoming_message(headed_message)?;
+                response_opt
+                    .into_iter()
+                    .for_each(|response| self.receipt_queue.push_back(response));
+                message_opt.into_iter().for_each(|message| {
+                    self.last_received.push_back(message.apply_peer_id(peer_id))
+                });
+            }
         }
 
         while !self.last_received.is_empty() {

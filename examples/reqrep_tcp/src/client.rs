@@ -39,8 +39,8 @@ impl<Socket> OperationClient<Socket>
             };
             let message = TypedMessage::new(data::TimedOperation(operation, Duration::now()));
             println!("Request: Conversation: {}", message.conversation_id().get());
-            self.socket.send_typed(message, OpFlag::NoWait).unwrap();
-            while let Ok(result) = self.socket.receive_typed::<data::TimedOperation<data::OperationResult>>(OpFlag::NoWait)
+            self.socket.send_typed(message, OpFlag::Wait).unwrap();
+            let result = self.socket.receive_typed::<data::TimedOperation<data::OperationResult>>(OpFlag::Wait).unwrap();
             {
                 let elapsed_duration = Duration::now().0 - result.payload().1.0;
                 println!("Response: Conversation: {}. Elapsed milisecs: {}", result.conversation_id().get(), elapsed_duration.as_millis());

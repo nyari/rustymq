@@ -1,4 +1,5 @@
 use core::socket::SocketInternalError;
+use core::stream::tracker::TrackingError;
 use std::convert::From;
 use std::io;
 
@@ -26,6 +27,16 @@ impl From<io::Error> for SocketInternalError {
                 "Stream error that cannot be handled: {:?}",
                 error.kind()
             )),
+        }
+    }
+}
+
+impl From<TrackingError> for State {
+    fn from(error: TrackingError) -> Self {
+        match error {
+            TrackingError::ReceiptError => {
+                State::Stream(SocketInternalError::TransportIntegrityError)
+            }
         }
     }
 }
