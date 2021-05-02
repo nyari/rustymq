@@ -39,12 +39,12 @@ impl ReadWriteStremConnectionState {
 /// # Tasks
 /// * It constructs the outward message from which copies can be requestsed
 /// * Inward queue is required to queue incoming messages to
-/// * Using [`stream::RawMessageReader`] for reading messages from input stream
-/// * Using [`stream::RawMessageWriter`] for writing messages to output stream
+/// * Using [`stream::StreamSerializableReader`] for reading messages from input stream
+/// * Using [`stream::StreamSerializableWriter`] for writing messages to output stream
 pub struct ReadWriteStreamConnection<S: io::Read + io::Write + Send> {
     stream: S,
-    reader: stream::RawMessageReader,
-    writer: stream::RawMessageWriter,
+    reader: stream::StreamSerializableReader,
+    writer: stream::StreamSerializableWriter,
     outward_queue: MessageQueueReceiver<RawMessage>,
     inward_queue: MessageQueueSender<RawMessage>,
     peer_id: PeerId,
@@ -63,8 +63,8 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
     ) -> Self {
         Self {
             stream: stream,
-            reader: stream::RawMessageReader::new(BUFFER_BATCH_SIZE),
-            writer: stream::RawMessageWriter::new_empty(),
+            reader: stream::StreamSerializableReader::new(BUFFER_BATCH_SIZE),
+            writer: stream::StreamSerializableWriter::new_empty(),
             outward_queue: outward_queue,
             inward_queue: inward_queue,
             peer_id: peer_id,
@@ -84,7 +84,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         self.inward_queue.receiver_pair()
     }
 
-    /// Read next chunk from the input stream into [`stream::RawMessageReader`]
+    /// Read next chunk from the input stream into [`stream::StreamSerializableReader`]
     pub fn process_receiving(
         &mut self,
     ) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
@@ -96,7 +96,7 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         }
     }
 
-    /// Write next chunk of output into [`stream::RawMessageWriter`]
+    /// Write next chunk of output into [`stream::StreamSerializableWriter`]
     pub fn process_sending(
         &mut self,
     ) -> Result<ReadWriteStremConnectionState, SocketInternalError> {
@@ -116,57 +116,60 @@ impl<S: io::Read + io::Write + Send> ReadWriteStreamConnection<S> {
         }
     }
 
-    /// Take message from output queue and add it to [`stream::RawMessageWriter`]
+    /// Take message from output queue and add it to [`stream::StreamSerializableWriter`]
     fn dequeue_next_outgoing_message_to_writer(&mut self) -> Result<(), stream::State> {
         match self.receipt_queue.pop_front() {
             Some(transport_receipt) => match self.outward_queue.receive_async_with_receipt() {
                 Ok(Some((Some(receipt), message))) => Ok(self.writer =
-                    stream::RawMessageWriter::new_with_receipt(
+                    stream::StreamSerializableWriter::new_with_receipt(
                         self.tracker
                             .head_message_and_receipt(message, transport_receipt.into_parts().0),
                         BUFFER_BATCH_SIZE,
                         receipt,
                     )),
-                Ok(Some((None, message))) => Ok(self.writer = stream::RawMessageWriter::new(
-                    self.tracker
-                        .head_message_and_receipt(message, transport_receipt.into_parts().0),
-                    BUFFER_BATCH_SIZE,
-                )),
+                Ok(Some((None, message))) => Ok(self.writer =
+                    stream::StreamSerializableWriter::new(
+                        self.tracker
+                            .head_message_and_receipt(message, transport_receipt.into_parts().0),
+                        BUFFER_BATCH_SIZE,
+                    )),
                 Ok(None) => {
                     self.writer =
-                        stream::RawMessageWriter::new(transport_receipt, BUFFER_BATCH_SIZE);
+                        stream::StreamSerializableWriter::new(transport_receipt, BUFFER_BATCH_SIZE);
                     Err(stream::State::Remainder)
                 }
                 Err(err) => Err(stream::State::Stream(err.into())),
             },
             None => match self.outward_queue.receive_async_with_receipt() {
                 Ok(Some((Some(receipt), message))) => Ok(self.writer =
-                    stream::RawMessageWriter::new_with_receipt(
+                    stream::StreamSerializableWriter::new_with_receipt(
                         self.tracker.head_message(message),
                         BUFFER_BATCH_SIZE,
                         receipt,
                     )),
-                Ok(Some((None, message))) => Ok(self.writer = stream::RawMessageWriter::new(
-                    self.tracker.head_message(message),
-                    BUFFER_BATCH_SIZE,
-                )),
+                Ok(Some((None, message))) => Ok(self.writer =
+                    stream::StreamSerializableWriter::new(
+                        self.tracker.head_message(message),
+                        BUFFER_BATCH_SIZE,
+                    )),
                 Ok(None) => Err(stream::State::Empty),
                 Err(err) => Err(stream::State::Stream(err.into())),
             },
         }
     }
 
-    /// Handle writing a chunk of data into [`io::Write`] with [`stream::RawMessageWriter`]
+    /// Handle writing a chunk of data into [`io::Write`] with [`stream::StreamSerializableWriter`]
     fn proceed_sending(&mut self) -> Result<(), stream::State> {
         self.writer.write_into(&mut self.stream)
     }
 
     // Queue a hearbeat signal to check connection integrity
     fn send_hearbeat(&mut self) {
-        self.receipt_queue.push_back(self.tracker.hearbeat_message());
+        self.receipt_queue
+            .push_back(self.tracker.hearbeat_message());
     }
 
-    /// Handle reading a chunk of data from [`io::Read`] with [`stream::RawMessageReader`]
+    /// Handle reading a chunk of data from [`io::Read`] with [`stream::StreamSerializableReader`]
     fn proceed_receiving(&mut self) -> Result<(), stream::State> {
         if self.last_received.is_empty() {
             let messages = self.reader.read_into(&mut self.stream)?;

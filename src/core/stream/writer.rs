@@ -1,21 +1,20 @@
 use core::message::Buffer;
 use core::queue::ReceiverReceipt;
-use core::serializer::{BufferSlice, FlatSerializer, Serializer};
-use core::stream::header::HeadedMessage;
+use core::serializer::{BufferSlice, FlatSerializer, Serializable, Serializer};
 
 use super::State;
 
 use std::io::Write;
 
-pub struct RawMessageWriter {
+pub struct StreamSerializableWriter {
     buffer: Buffer,
     receipt: Option<ReceiverReceipt>,
     batch_size: usize,
     offset: usize,
 }
 
-impl RawMessageWriter {
-    pub fn new(message: HeadedMessage, batch_size: usize) -> Self {
+impl StreamSerializableWriter {
+    pub fn new<T: Serializable>(message: T, batch_size: usize) -> Self {
         Self {
             buffer: {
                 let mut serializer = FlatSerializer::new();
@@ -28,8 +27,8 @@ impl RawMessageWriter {
         }
     }
 
-    pub fn new_with_receipt(
-        message: HeadedMessage,
+    pub fn new_with_receipt<T: Serializable>(
+        message: T,
         batch_size: usize,
         receipt: ReceiverReceipt,
     ) -> Self {

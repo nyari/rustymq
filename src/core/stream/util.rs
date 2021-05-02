@@ -37,6 +37,9 @@ impl From<TrackingError> for State {
             TrackingError::ReceiptError => {
                 State::Stream(SocketInternalError::TransportIntegrityError)
             }
+            TrackingError::IncompatibleHeaderVersion => {
+                State::Stream(SocketInternalError::IncompatiblePeer)
+            }
         }
     }
 }

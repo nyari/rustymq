@@ -11,6 +11,7 @@ struct Tracked(u32, Duration);
 #[derive(Debug, Clone, Copy)]
 pub enum TrackingError {
     ReceiptError,
+    IncompatibleHeaderVersion,
 }
 
 pub struct Tracker {
@@ -61,6 +62,10 @@ impl Tracker {
         headed_message: HeadedMessage,
     ) -> Result<(Option<RawMessage>, Option<HeadedMessage>), TrackingError> {
         let (header, op) = headed_message.into_parts();
+        if !header.compatible() {
+            return Err(TrackingError::IncompatibleHeaderVersion);
+        }
+
         match op {
             HeaderOperation::Payload(message) => Ok((
                 Some(message),
