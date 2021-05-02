@@ -34,7 +34,9 @@ impl From<io::Error> for SocketInternalError {
 impl From<TrackingError> for State {
     fn from(error: TrackingError) -> Self {
         match error {
-            TrackingError::ReceiptError => State::Stream(SocketInternalError::TransportIntegrityError)
+            TrackingError::ReceiptError => {
+                State::Stream(SocketInternalError::TransportIntegrityError)
+            }
         }
     }
 }

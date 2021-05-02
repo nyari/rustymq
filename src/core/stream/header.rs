@@ -1,13 +1,13 @@
-use core::message::{RawMessage};
-use core::serializer::{Serializable, Serializer, Deserializer};
+use core::message::RawMessage;
 use core::serializer;
-const STREAM_HEADER_VERSION:u8 = 0u8;
+use core::serializer::{Deserializer, Serializable, Serializer};
+const STREAM_HEADER_VERSION: u8 = 0u8;
 
 pub enum HeaderOperation {
     Payload(RawMessage),
     Heartbeat,
     Receipt,
-    ReceiptWithNextPayload(Header, RawMessage)
+    ReceiptWithNextPayload(Header, RawMessage),
 }
 
 impl Serializable for HeaderOperation {
@@ -16,10 +16,10 @@ impl Serializable for HeaderOperation {
             HeaderOperation::Payload(message) => {
                 serializer.serialize(&0u8);
                 serializer.serialize(message);
-            },
+            }
             HeaderOperation::Heartbeat => {
                 serializer.serialize(&1u8);
-            },
+            }
             HeaderOperation::Receipt => {
                 serializer.serialize(&2u8);
             }
@@ -32,25 +32,30 @@ impl Serializable for HeaderOperation {
     }
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         match deserializer.deserialize::<u8>()? {
-            0u8 => Ok(HeaderOperation::Payload(deserializer.deserialize::<RawMessage>()?)),
+            0u8 => Ok(HeaderOperation::Payload(
+                deserializer.deserialize::<RawMessage>()?,
+            )),
             1u8 => Ok(HeaderOperation::Heartbeat),
             2u8 => Ok(HeaderOperation::Receipt),
-            3u8 => Ok(HeaderOperation::ReceiptWithNextPayload(deserializer.deserialize::<Header>()?, deserializer.deserialize::<RawMessage>()?)),
-            _ => Err(serializer::Error::DemarshallingFailed)
+            3u8 => Ok(HeaderOperation::ReceiptWithNextPayload(
+                deserializer.deserialize::<Header>()?,
+                deserializer.deserialize::<RawMessage>()?,
+            )),
+            _ => Err(serializer::Error::DemarshallingFailed),
         }
     }
 }
 
 pub struct Header {
     version: u8,
-    sequence: u32
+    sequence: u32,
 }
 
 impl Header {
     pub fn new(sequence: u32) -> Self {
         Self {
             version: STREAM_HEADER_VERSION,
-            sequence: sequence
+            sequence: sequence,
         }
     }
 
@@ -70,7 +75,7 @@ impl Serializable for Header {
     }
 
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
-        Ok(Self{
+        Ok(Self {
             version: deserializer.deserialize()?,
             sequence: deserializer.deserialize()?,
         })
@@ -79,7 +84,7 @@ impl Serializable for Header {
 
 pub struct HeadedMessage {
     header: Header,
-    operation: HeaderOperation
+    operation: HeaderOperation,
 }
 
 impl HeadedMessage {
@@ -102,7 +107,7 @@ impl Serializable for HeadedMessage {
     }
 
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
-        Ok(Self{
+        Ok(Self {
             header: deserializer.deserialize()?,
             operation: deserializer.deserialize()?,
         })

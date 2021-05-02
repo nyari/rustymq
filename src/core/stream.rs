@@ -3,11 +3,11 @@
 //! and [`std::io::Write`] capable streams
 
 mod connection;
+mod header;
 mod reader;
+mod tracker;
 mod util;
 mod writer;
-mod header;
-mod tracker;
 
 pub use self::connection::*;
 pub use self::reader::*;

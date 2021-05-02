@@ -1,7 +1,7 @@
-use core::message::{Buffer};
-use core::stream::header::{HeadedMessage};
+use core::message::Buffer;
 use core::queue::ReceiverReceipt;
 use core::serializer::{BufferSlice, FlatSerializer, Serializer};
+use core::stream::header::HeadedMessage;
 
 use super::State;
 

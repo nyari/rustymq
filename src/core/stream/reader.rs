@@ -1,9 +1,9 @@
 use super::State;
-use core::message::{Buffer};
-use core::stream::header::{HeadedMessage};
+use core::message::Buffer;
 use core::serializer;
 use core::serializer::{FlatDeserializer, Serializable};
 use core::socket::SocketInternalError;
+use core::stream::header::HeadedMessage;
 
 use std::io::Read;
 

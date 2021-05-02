@@ -101,7 +101,9 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
         let stream = net::TcpStream::connect(addr)?;
         stream.set_nodelay(true)?;
         //stream.set_nonblocking(true)?;
-        stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(
             SOCKET_READ_TIMEOUT_MS,
         )))?;
@@ -123,7 +125,9 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     ) -> Result<stream::ReadWriteStreamConnection<net::TcpStream>, SocketInternalError> {
         stream.set_nodelay(true)?;
         //stream.set_nonblocking(true)?;
-        stream.set_write_timeout(Some(std::time::Duration::from_millis(SOCKET_READ_TIMEOUT_MS)))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_millis(
+            SOCKET_READ_TIMEOUT_MS,
+        )))?;
         stream.set_read_timeout(Some(std::time::Duration::from_millis(
             SOCKET_READ_TIMEOUT_MS,
         )))?;
