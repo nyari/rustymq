@@ -34,7 +34,7 @@ impl<Socket> OperationServer<Socket>
                 // Create threads that handle new messages
                 result.push(thread::spawn(move || {
                     loop {
-                        arc_socket.respond_typed(OpFlag::NoWait, OpFlag::NoWait, |message: TypedMessage<data::TimedOperation<data::OperationTask>> | {
+                        arc_socket.respond_typed(OpFlag::Wait, OpFlag::NoWait, |message: TypedMessage<data::TimedOperation<data::OperationTask>> | {
                             let (metadata, input) = message.into_parts();
                             let (peer_id, conversation_id) = (metadata.peer_id().unwrap().clone(), metadata.conversation_id().clone());
 
