@@ -1,12 +1,11 @@
 //! # Data module
 //! This module is used to define the datastructure between the client and server and implements serialization
 
-use rustymq::core::message::SerializableMessagePayload;
+use rustymq::base::{SerializableMessagePayload, Buffer, BufferSlice};
 
 /// For serialization in this example the internal serializer of RusyMQ is used. Although it is possible to use
 /// any serializaton method or library.
-use rustymq::core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error};
-use rustymq::base::message::{Buffer, BufferSlice};
+use rustymq::internals::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error};
 use super::time::{Duration};
 use std::time;
 
@@ -90,6 +89,8 @@ impl Serializable for OperationResult {
     }
 }
 
+/// #Timed operation
+/// It wraps an operation to contain timing data. This enables the usage of timing the message round trip times
 #[derive(Debug)]
 pub struct TimedOperation<T>(pub T, pub Duration) where T: Serializable;
 

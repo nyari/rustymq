@@ -3,7 +3,7 @@ use crate::base::socket::{OpFlag, SocketError};
 use crate::internals::queue::ReceiptState;
 
 use std::string::String;
-/// # [`Socket`] errors
+/// # [`crate::base::Socket`] errors
 /// Contains the possible errors for a socket that may need to be handled internally or by the user
 #[derive(Debug, Clone)]
 pub enum SocketInternalError {

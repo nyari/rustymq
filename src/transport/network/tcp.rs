@@ -1,5 +1,5 @@
 //! # Network transport through TCP
-//! This module contains the [`crate::core::transport::Transport`] definitions to be able to use TCP based communication
+//! This module contains the [`crate::base::Transport`] definitions to be able to use TCP based communication
 
 use super::common::*;
 use crate::base::config::TransportConfiguration;

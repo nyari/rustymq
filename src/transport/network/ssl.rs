@@ -1,5 +1,5 @@
 //! # Network transport through SSL
-//! This module contains the [`crate::core::transport::Transport`] definitions to be able to use SSL based communication
+//! This module contains the [`crate::base::Transport`] definitions to be able to use SSL based communication
 
 use super::common::*;
 
