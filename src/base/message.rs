@@ -5,16 +5,24 @@
 //! This module containts the definition of Messages, which are a core concept of RustyMQ.
 //! All the datastructures, traits and enums needed to compose messages for sending and then
 //! receiving are defined here
-use core::serializer;
-use core::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializable, Serializer};
+use crate::base::info::Identifier;
+use crate::internals::serializer;
+use crate::internals::serializer::{
+    Deserializer, FlatDeserializer, FlatSerializer, Serializable, Serializer,
+};
+
 use std;
 use std::convert::TryFrom;
 use std::ops::{Deref, DerefMut};
 
-pub use core::serializer::{Buffer, BufferSlice};
-use core::util::Identifier;
-
 const MESSAGE_METADATA_VERSION: u8 = 0u8;
+
+/// General buffer type to be used in RusyMQ
+pub type Buffer = Vec<u8>;
+/// General buffer slice type to be used in RustyMQ
+pub type BufferSlice<'a> = &'a [u8];
+/// General buffer mutable slice type to be used in RustyMQ
+pub type BufferMutSlice<'a> = &'a mut [u8];
 
 /// # Multipart message part identifier
 /// Enum for tracking multipart messages

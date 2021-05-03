@@ -1,8 +1,9 @@
-use super::State;
-use core::message::Buffer;
-use core::serializer;
-use core::serializer::{FlatDeserializer, Serializable};
-use core::socket::SocketInternalError;
+use crate::base::message::Buffer;
+
+use crate::internals::serializer;
+use crate::internals::serializer::{FlatDeserializer, Serializable};
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream::info::State;
 
 use std::io::Read;
 
@@ -125,8 +126,8 @@ impl StreamSerializableReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::message::{Message, RawMessage};
-    use core::serializer::{FlatSerializer, Serializer};
+    use crate::base::message::{Message, RawMessage};
+    use crate::internals::serializer::{FlatSerializer, Serializer};
     use std::io::Cursor;
 
     impl PartialEq for RawMessage {

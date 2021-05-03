@@ -5,7 +5,8 @@ use rustymq::core::message::SerializableMessagePayload;
 
 /// For serialization in this example the internal serializer of RusyMQ is used. Although it is possible to use
 /// any serializaton method or library.
-use rustymq::core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error, Buffer, BufferSlice};
+use rustymq::core::serializer::{Serializable, Serializer, Deserializer, FlatSerializer, FlatDeserializer, Error};
+use rustymq::base::message::{Buffer, BufferSlice};
 use super::time::{Duration};
 use std::time;
 

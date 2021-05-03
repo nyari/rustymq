@@ -6,4 +6,4 @@
 pub mod ssl;
 pub mod tcp;
 
-pub mod internal;
+pub mod common;

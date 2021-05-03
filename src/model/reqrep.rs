@@ -38,16 +38,17 @@
 //! # }
 //! ```
 
-use core::config::TransportConfiguration;
-use core::message::{
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{
     ConversationId, Message, MessageMetadata, Part, PartError, PeerId, RawMessage,
 };
-use core::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
-use core::socket::{
+use crate::base::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
+use crate::base::socket::{
     BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket,
-    SocketError, SocketInternalError,
+    SocketError,
 };
-use core::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
+use crate::base::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
+use crate::internals::socket::SocketInternalError;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

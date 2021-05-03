@@ -4,12 +4,12 @@
 
 mod connection;
 mod header;
+mod info;
 mod reader;
 mod tracker;
-mod util;
 mod writer;
 
-pub use self::connection::*;
-pub use self::reader::*;
-pub use self::util::*;
-pub use self::writer::*;
+pub use self::connection::{ReadWriteStreamConnection, ReadWriteStreamConnectionThreadManager};
+pub use self::info::State;
+pub use self::reader::StreamSerializableReader;
+pub use self::writer::StreamSerializableWriter;

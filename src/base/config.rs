@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use core::queue::MessageQueueingPolicy;
+use crate::base::queue::MessageQueueingPolicy;
 
 #[derive(Debug, Clone)]
 pub struct TransportConfiguration {

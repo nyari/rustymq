@@ -4,9 +4,10 @@ pub mod network;
 
 pub use self::network::NetworkAddress;
 
-use core::config::TransportConfiguration;
-use core::message::{PeerId, RawMessage};
-use core::socket::{OpFlag, PeerIdentification, SocketError};
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{PeerId, RawMessage};
+use crate::base::socket::{OpFlag, PeerIdentification, SocketError};
+
 use std::any;
 use std::collections::HashSet;
 

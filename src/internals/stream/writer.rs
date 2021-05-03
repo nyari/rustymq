@@ -1,8 +1,8 @@
-use core::message::Buffer;
-use core::queue::ReceiverReceipt;
-use core::serializer::{BufferSlice, FlatSerializer, Serializable, Serializer};
+use crate::base::message::Buffer;
+use crate::internals::queue::ReceiverReceipt;
+use crate::internals::serializer::{BufferSlice, FlatSerializer, Serializable, Serializer};
 
-use super::State;
+use crate::internals::stream::info::State;
 
 use std::io::Write;
 

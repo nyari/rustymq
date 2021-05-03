@@ -3,43 +3,8 @@ use std::ops::{Deref, Drop};
 use std::sync::Arc;
 use std::time::Duration;
 
-use core::util::thread::ChgNtfMutex;
-
-#[derive(Debug)]
-pub enum MessageQueueError {
-    SendersAllDropped,
-    ReceiversAllDropped,
-    Timeout,
-    QueueFull,
-    Dropped,
-}
-
-#[derive(Debug, Clone)]
-pub enum MessageQueueOverflowHandling {
-    Throttle,
-    Drop,
-    ErrorAndDrop,
-    ErrorAndForceExtend,
-    Panic,
-}
-
-#[derive(Clone, Debug)]
-pub struct MessageQueueingPolicy {
-    pub overflow: Option<(MessageQueueOverflowHandling, usize)>,
-}
-
-impl MessageQueueingPolicy {
-    pub fn default() -> Self {
-        Self { overflow: None }
-    }
-
-    pub fn with_overflow(self, overflow: Option<(MessageQueueOverflowHandling, usize)>) -> Self {
-        Self {
-            overflow: overflow,
-            ..self
-        }
-    }
-}
+use crate::base::queue::{MessageQueueError, MessageQueueOverflowHandling, MessageQueueingPolicy};
+use crate::internals::util::thread::ChgNtfMutex;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ReceiptState {

@@ -35,12 +35,12 @@
 //! # }
 //! ```
 
-use core::message::{Message, MessageMetadata, PeerId, RawMessage};
-use core::socket::{
+use crate::base::message::{Message, MessageMetadata, PeerId, RawMessage};
+use crate::base::socket::{
     InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket, SocketError,
-    SocketInternalError,
 };
-use core::transport::{AcceptorTransport, InitiatorTransport, TransportMethod};
+use crate::base::transport::{AcceptorTransport, InitiatorTransport, TransportMethod};
+use crate::internals::socket::SocketInternalError;
 
 use std::collections::HashSet;
 use std::sync::Mutex;

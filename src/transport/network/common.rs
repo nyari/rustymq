@@ -1,16 +1,19 @@
 //! # Internal helper module for network connections
 //! This module contains functionality to establish stream based connectons through network
 
-use core::config::TransportConfiguration;
-use core::message::{Message, PeerId, RawMessage};
-use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, ReceiptState};
-use core::socket::{OpFlag, PeerIdentification, SocketError, SocketInternalError};
-use core::stream;
-use core::transport::{
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{Message, PeerId, RawMessage};
+use crate::base::queue::MessageQueueError;
+use crate::base::socket::{OpFlag, PeerIdentification, SocketError};
+use crate::base::transport::{
     AcceptorTransport, InitiatorTransport, NetworkAddress, Transport, TransportMethod,
 };
-use core::util::thread::{Semaphore, Sleeper};
-use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
+
+use crate::internals::queue::{MessageQueueReceiver, MessageQueueSender, ReceiptState};
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream;
+use crate::internals::util::thread::{Semaphore, Sleeper};
+use crate::internals::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -23,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::core::util;
+use crate::internals::util;
 
 fn query_acceptor_thread_default_duration_backoff(
 ) -> DurationBackoffWithDebounce<LinearDurationBackoff> {

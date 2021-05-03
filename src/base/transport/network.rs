@@ -1,6 +1,7 @@
 //! # Network transport core
 //! Module containing the datastructures for specifiyng peers through network
-use core::util::SingleIter;
+use crate::internals::util::SingleIter;
+
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::string::String;

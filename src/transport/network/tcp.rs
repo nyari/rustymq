@@ -1,13 +1,13 @@
 //! # Network transport through TCP
 //! This module contains the [`crate::core::transport::Transport`] definitions to be able to use TCP based communication
 
-use super::internal::*;
-use core::config::TransportConfiguration;
-use core::message::{PeerId, RawMessage};
-use core::queue::{MessageQueueReceiver, MessageQueueSender};
-use core::socket::SocketInternalError;
-use core::stream;
-use core::transport::NetworkAddress;
+use super::common::*;
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{PeerId, RawMessage};
+use crate::base::transport::NetworkAddress;
+use crate::internals::queue::{MessageQueueReceiver, MessageQueueSender};
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream;
 
 use std::io;
 use std::net;

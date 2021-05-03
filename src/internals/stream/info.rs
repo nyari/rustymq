@@ -1,5 +1,5 @@
-use core::socket::SocketInternalError;
-use core::stream::tracker::TrackingError;
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream::tracker::TrackingError;
 use std::convert::From;
 use std::io;
 

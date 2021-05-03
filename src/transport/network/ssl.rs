@@ -1,22 +1,22 @@
 //! # Network transport through SSL
 //! This module contains the [`crate::core::transport::Transport`] definitions to be able to use SSL based communication
 
-use super::internal::*;
+use super::common::*;
 
 use openssl::ssl::{SslAcceptor, SslConnector, SslStream};
-use std::net::SocketAddr;
 
-use core::config::TransportConfiguration;
-use core::message::{PeerId, RawMessage};
-use core::queue::{MessageQueueReceiver, MessageQueueSender};
-use core::socket::SocketInternalError;
-use core::stream;
-use core::transport::NetworkAddress;
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{PeerId, RawMessage};
+use crate::base::transport::NetworkAddress;
+use crate::internals::queue::{MessageQueueReceiver, MessageQueueSender};
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream;
 
 use std::sync::Arc;
 
 use std::io;
 use std::net;
+use std::net::SocketAddr;
 
 const SOCKET_READ_TIMEOUT_MS: u64 = 1;
 
