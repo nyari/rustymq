@@ -14,18 +14,25 @@
 //!
 //! ## Example usage
 //! ```rust
-//! use rustymq::model::reqrep::{RequestSocket, ReplySocket};
+//! use rustymq::model::{RequestSocket, ReplySocket};
 //! use rustymq::transport::network::tcp;
-//! use rustymq::core::{Message, RawMessage, OpFlag, Socket,
-//!                     InwardSocket, OutwardSocket, BidirectionalSocket};
+//! use rustymq::base::{Message, RawMessage, OpFlag, Socket,
+//!                     InwardSocket, OutwardSocket, BidirectionalSocket,
+//!                     NetworkAddress};
 //!
 //! fn main() {
-//!     let requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
-//!     let replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
-//!                                                                tcp::StreamListenerBuilder::new())).unwrap();
+//!     let requestor = RequestSocket::new(
+//!                         tcp::InitiatorTransport::new(
+//!                             tcp::StreamConnectionBuilder::new()))
+//!                     .unwrap();
+//!     let replier = ReplySocket::new(
+//!                     tcp::AcceptorTransport::new(
+//!                         tcp::StreamConnectionBuilder::new(),
+//!                         tcp::StreamListenerBuilder::new()))
+//!                   .unwrap();
 //!     
-//!     replier.bind(rustymq::core::TransportMethod::Network(rustymq::core::NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();
-//!     requestor.connect(rustymq::core::TransportMethod::Network(rustymq::core::NetworkAddress::from_dns("localhost:45322".to_string()).unwrap())).unwrap();
+//!     replier.bind(NetworkAddress::from_dns("localhost:45322".to_string()).unwrap().into()).unwrap();
+//!     requestor.connect(NetworkAddress::from_dns("localhost:45322".to_string()).unwrap().into()).unwrap();
 //!     
 //!     let payload:Vec<u8> = vec![0u8, 5u8];
 //!     let message = RawMessage::new(payload.clone());

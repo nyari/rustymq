@@ -21,6 +21,12 @@ pub enum TransportMethod {
     Custom(Box<dyn any::Any>),
 }
 
+impl From<NetworkAddress> for TransportMethod {
+    fn from(value: NetworkAddress) -> Self {
+        TransportMethod::Network(value)
+    }
+}
+
 /// # Transport
 /// Trait that every transport layer implementation has to implement. This is the interface a Socket uses internally
 /// to establis a connection

@@ -5,21 +5,24 @@
 //! will be distributed the all the connecting peers with a [`SubscriberSocket`]
 //! ## Example
 //! ```rust
-//! use rustymq::core::socket::{Socket, InwardSocket, OutwardSocket, OpFlag};
-//! use rustymq::core::message::{Message, RawMessage};
-//! use rustymq::core::transport::{TransportMethod, NetworkAddress};
-//! use rustymq::model::pubsub::{PublisherSocket, SubscriberSocket};
+//! use rustymq::base::{Socket, InwardSocket, OutwardSocket, OpFlag,
+//!                     Message, RawMessage,
+//!                     TransportMethod, NetworkAddress};
+//! use rustymq::model::{PublisherSocket, SubscriberSocket};
 //! use rustymq::transport::network::tcp;
 //! # fn main() {
 //!
-//! let publisher = PublisherSocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
-//!                                                                  tcp::StreamListenerBuilder::new()));
+//! let publisher = PublisherSocket::new(
+//!                     tcp::AcceptorTransport::new(
+//!                         tcp::StreamConnectionBuilder::new(),
+//!                         tcp::StreamListenerBuilder::new()
+//!                 ));
 //! let subscriber1 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
 //! let subscriber2 = SubscriberSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new()));
 //!
-//! publisher.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
-//! subscriber1.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
-//! subscriber2.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap()));
+//! publisher.bind(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap().into());
+//! subscriber1.connect(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap().into());
+//! subscriber2.connect(NetworkAddress::from_dns("localhost:12000".to_string()).unwrap().into());
 //!
 //! // Make sure that TCP connection is established otherwise the first sent message might not arrive
 //! std::thread::sleep(std::time::Duration::from_millis(100));
