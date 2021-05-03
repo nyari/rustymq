@@ -1,9 +1,11 @@
-pub use super::super::*;
-
 use super::common::*;
-use core::message::{Message, TypedMessage};
-use core::socket::{InwardSocket, OpFlag, OutwardSocket, Socket};
-use core::transport::NetworkAddress;
+
+use crate::base::{
+    InwardSocket, Message, NetworkAddress, OpFlag, OutwardSocket, Socket, TransportMethod,
+    TypedMessage,
+};
+use crate::model;
+use crate::transport;
 
 #[test]
 fn simple_pub_sub_tcp_test() {
@@ -27,32 +29,32 @@ fn simple_pub_sub_tcp_test() {
         ));
 
     publisher1
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46000".to_string()).unwrap(),
         ))
         .unwrap();
     publisher2
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46001".to_string()).unwrap(),
         ))
         .unwrap();
     subscriber1
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46000".to_string()).unwrap(),
         ))
         .unwrap();
     subscriber2
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46000".to_string()).unwrap(),
         ))
         .unwrap();
     subscriber1
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46001".to_string()).unwrap(),
         ))
         .unwrap();
     subscriber2
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:46001".to_string()).unwrap(),
         ))
         .unwrap();

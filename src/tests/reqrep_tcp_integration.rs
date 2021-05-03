@@ -1,12 +1,12 @@
-pub use super::super::*;
-
 use super::common::*;
-use core::message::{Message, MessageMetadata, TypedMessage};
-use core::socket::{
-    BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, QueryTypedError, ReceiveTypedError,
-    SendTypedError, Socket, SocketError,
+
+use crate::base::{
+    BidirectionalSocket, InwardSocket, Message, MessageMetadata, NetworkAddress, OpFlag,
+    OutwardSocket, QueryTypedError, ReceiveTypedError, SendTypedError, Socket, SocketError,
+    TransportMethod, TypedMessage,
 };
-use core::transport::NetworkAddress;
+use crate::model;
+use crate::transport;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -24,12 +24,12 @@ fn simple_req_rep_tcp_test() {
     .unwrap();
 
     replier
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45321".to_string()).unwrap(),
         ))
         .unwrap();
     requestor
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45321".to_string()).unwrap(),
         ))
         .unwrap();
@@ -69,12 +69,12 @@ fn stress_simple_req_rep_tcp_test() {
     .unwrap();
 
     replier
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:48000".to_string()).unwrap(),
         ))
         .unwrap();
     requestor
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:48000".to_string()).unwrap(),
         ))
         .unwrap();
@@ -142,12 +142,12 @@ fn simple_req_rep_tcp_test_disconnected_before_first_send() {
     .unwrap();
 
     replier
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45322".to_string()).unwrap(),
         ))
         .unwrap();
     requestor
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45322".to_string()).unwrap(),
         ))
         .unwrap();

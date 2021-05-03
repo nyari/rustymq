@@ -12,7 +12,7 @@ pub use self::config::TransportConfiguration;
 pub use self::info::Identifier;
 pub use self::message::{
     Buffer, BufferMutSlice, BufferSlice, ConversationId, Message, MessageId, MessageMetadata, Part,
-    PartError, PeerId, RawMessage, TypedMessage,
+    PartError, PeerId, RawMessage, SerializableMessagePayload, TypedMessage,
 };
 pub use self::queue::{MessageQueueError, MessageQueueOverflowHandling, MessageQueueingPolicy};
 pub use self::socket::{

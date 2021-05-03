@@ -1,5 +1,4 @@
-//! # Internal helper module for network connections
-//! This module contains functionality to establish stream based connectons through network
+//! # Internal helper module containing common parts of general network based communications
 
 use crate::base::config::TransportConfiguration;
 use crate::base::message::{Message, PeerId, RawMessage};
