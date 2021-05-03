@@ -1,4 +1,4 @@
-//! # Core internal utilites
+//! # Internal utilites
 //! The module contains miscellaneous datastructures and functionalities
 //! used by RustyMQ
 

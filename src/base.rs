@@ -1,5 +1,5 @@
 //! # Base module
-//! Core data structures, enums and traits needed for usage of RustyMq
+//! Core data structures, enums and traits needed for usage of RustyMQ
 
 pub mod config;
 pub mod info;
