@@ -11,7 +11,8 @@ use crate::base::transport::{
 use crate::internals::queue::{MessageQueueReceiver, MessageQueueSender, ReceiptState};
 use crate::internals::socket::SocketInternalError;
 use crate::internals::stream;
-use crate::internals::util::thread::{Semaphore, Sleeper};
+use crate::internals::util::thread::{Sleeper};
+use crate::internals::util::sync::{Semaphore};
 use crate::internals::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
 use std::collections::{HashMap, HashSet};

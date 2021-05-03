@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::base::queue::{MessageQueueError, MessageQueueOverflowHandling, MessageQueueingPolicy};
-use crate::internals::util::thread::ChgNtfMutex;
+use crate::internals::util::sync::ChgNtfMutex;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ReceiptState {

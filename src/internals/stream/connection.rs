@@ -5,7 +5,8 @@ use crate::internals::socket::SocketInternalError;
 use crate::internals::stream;
 use crate::internals::stream::header::HeadedMessage;
 use crate::internals::stream::tracker::Tracker;
-use crate::internals::util::thread::{Semaphore, Sleeper};
+use crate::internals::util::thread::{Sleeper};
+use crate::internals::util::sync::{Semaphore};
 use crate::internals::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
 use std::collections::VecDeque;
