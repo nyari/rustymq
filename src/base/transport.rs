@@ -1,4 +1,4 @@
-//! # Transport core module
+//! # Transport base module
 //! Module containing interface and type definitions for transport methods that can be implemented in RustyMQ
 pub mod network;
 
@@ -17,7 +17,7 @@ use std::collections::HashSet;
 pub enum TransportMethod {
     /// Connect through network
     Network(NetworkAddress),
-    /// Allow implementation of custom transport methods
+    /// Allow implementation of custom transport methods to be used by custom [`Transport`] implementation
     Custom(Box<dyn any::Any>),
 }
 
