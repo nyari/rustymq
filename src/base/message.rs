@@ -270,9 +270,9 @@ pub type CommunicationModelId = u16;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct MessageMetadata {
     /// Message identifier for tracking a message. By default it is randomly generated
-    messageid: MessageId,
+    messageid: Option<MessageId>,
     /// Conversation identifier for tracking a conversation. By defailt it is randomly generated
-    conversationid: ConversationId,
+    conversationid: Option<ConversationId>,
     /// Model id for identification of the communication model used. For details see [super::super::model]:here
     modelid: Option<CommunicationModelId>,
     /// Peer id for idetification of the peer the message is addressed to or received from
@@ -283,8 +283,8 @@ pub struct MessageMetadata {
 
 impl MessageMetadata {
     /// Create a new randomly generated MessageMetadata instance
-    /// * Message identifier randomly generated
-    /// * Conversation identifier randomly generated
+    /// * Message identifier is set to None
+    /// * Conversation identifier set to None
     /// * Model identifier set to None
     /// * Peer identifier set to None
     /// * Part tracker set to None
@@ -300,8 +300,8 @@ impl MessageMetadata {
     /// ```
     pub fn new() -> Self {
         Self {
-            messageid: MessageId::new_random(),
-            conversationid: ConversationId::new_random(),
+            messageid: None,
+            conversationid: None,
             modelid: None,
             peerid: None,
             part: Part::Single,
@@ -332,6 +332,134 @@ impl MessageMetadata {
         }
     }
 
+    /// Generate new instance from current one with a message id applied to the message
+    ///
+    /// This method will commit the message id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId, MessageId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.message_id(), None));
+    ///
+    /// let message_id = MessageId::new(5);
+    /// let metadata = metadata.apply_message_id(message_id.clone());
+    /// assert!(std::matches!(metadata.message_id(), Some(message_id)));
+    /// # }
+    /// ```
+    pub fn apply_message_id(self, id: MessageId) -> Self {
+        Self {
+            messageid: Some(id),
+            ..self
+        }
+    }
+
+    /// Generate new instance from current one with a random message id applied to the message
+    ///
+    /// This method will commit the message id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.message_id(), None));
+    ///
+    /// let metadata = metadata.apply_random_message_id();
+    /// assert!(std::matches!(metadata.message_id(), Some(_)));
+    /// # }
+    /// ```
+    pub fn apply_random_message_id(self) -> Self {
+        Self {
+            messageid: Some(MessageId::new_random()),
+            ..self
+        }
+    }
+
+    /// Generate new instance from current one with a random message id if not already set
+    ///
+    /// This method will commit the message id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.message_id(), None));
+    ///
+    /// let metadata = metadata.ensure_random_message_id();
+    /// assert!(std::matches!(metadata.message_id(), Some(_)));
+    /// # }
+    /// ```
+    pub fn ensure_random_message_id(self) -> Self {
+        Self {
+            messageid: if let Some(id) = self.messageid { Some(id) } else { Some(MessageId::new_random())},
+            ..self
+        }
+    }
+
+    /// Generate new instance from current one with a conversation id applied to the message
+    ///
+    /// This method will commit the conversation id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId, ConversationId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.conversation_id(), None));
+    ///
+    /// let conversation_id = ConversationId::new(5);
+    /// let metadata = metadata.apply_conversation_id(conversation_id.clone());
+    /// assert!(std::matches!(metadata.conversation_id(), Some(conversation_id)));
+    /// # }
+    /// ```
+    pub fn apply_conversation_id(self, id: ConversationId) -> Self {
+        Self {
+            conversationid: Some(id),
+            ..self
+        }
+    }
+
+    /// Generate new instance from current one with a random conversation id applied to the conversation
+    ///
+    /// This method will commit the conversation id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.conversation_id(), None));
+    ///
+    /// let metadata = metadata.apply_random_conversation_id();
+    /// assert!(std::matches!(metadata.conversation_id(), Some(_)));
+    /// # }
+    /// ```
+    pub fn apply_random_conversation_id(self) -> Self {
+        Self {
+            conversationid: Some(ConversationId::new_random()),
+            ..self
+        }
+    }
+
+    /// Generate new instance from current one with a random conversation id if not already set
+    ///
+    /// This method will commit the conversation id given to the metadata but retain all the other fields
+    /// ## Example
+    /// ```rust
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId};
+    /// # fn main() {
+    /// let metadata = MessageMetadata::new();
+    /// assert!(std::matches!(metadata.conversation_id(), None));
+    ///
+    /// let metadata = metadata.ensure_random_conversation_id();
+    /// assert!(std::matches!(metadata.conversation_id(), Some(_)));
+    /// # }
+    /// ```
+    pub fn ensure_random_conversation_id(self) -> Self {
+        Self {
+            conversationid: if let Some(id) = self.conversationid { Some(id) } else { Some(ConversationId::new_random())},
+            ..self
+        }
+    }
+
     /// Generate new instance from current one with a peer identifier applied
     ///
     /// This method will commit the peer identifier given to the metadata but retain all the other fields
@@ -343,13 +471,24 @@ impl MessageMetadata {
     /// assert!(std::matches!(metadata.peer_id(), None));
     ///
     /// let peer_id = PeerId::new(5);
-    /// let metadata = metadata.applied_peer_id(peer_id.clone());
+    /// let metadata = metadata.apply_peer_id(peer_id.clone());
     /// assert!(std::matches!(metadata.peer_id(), Some(peer_id)));
     /// # }
     /// ```
-    pub fn applied_peer_id(self, id: PeerId) -> Self {
+    pub fn apply_peer_id(self, id: PeerId) -> Self {
         Self {
             peerid: Some(id),
+            ..self
+        }
+    }
+
+    /// Generate new instace with a new communication model id. (Only needed for custom communication model implementation)
+    ///
+    /// This is only needed in case you are implementing your own communication model. It will retain all fields of the metadata
+    /// except for the communication model identifier given as the parameter
+    pub fn apply_communication_model_id(self, model_id: CommunicationModelId) -> Self {
+        Self {
+            modelid: Some(model_id),
             ..self
         }
     }
@@ -378,47 +517,37 @@ impl MessageMetadata {
 
     /// Generate new instance for continuing an already existing conversation
     ///
-    /// This method will retain all fields of the metadata except for the message identifier and part
-    /// ## Example
+    /// This method will retain all fields of the metadata except message metadata if already set
+    /// and the part is set to single part
     /// ```rust
     /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
-    /// let original = MessageMetadata::new();
+    /// let original = MessageMetadata::new().ensure_random_conversation_id()
+    ///                                      .ensure_random_message_id();
     /// let original_converstion_id = original.conversation_id().clone();
     /// let original_clone = original.clone();
     ///
-    /// let continuation = original.continue_exchange();
+    /// let continuation = original.continue_conversation();
     /// assert_ne!(original_clone.message_id(), continuation.message_id());
     /// assert_eq!(original_clone.conversation_id(), continuation.conversation_id());
     /// assert_eq!(original_clone.peer_id(), continuation.peer_id());
     /// # }
     /// ```
-    pub fn continue_exchange(self) -> Self {
+    pub fn continue_conversation(self) -> Self {
         Self {
-            messageid: MessageId::new_random(),
+            messageid: if let Some(_) = self.messageid {Some(MessageId::new_random())} else {None},
             part: Part::single(),
             ..self
         }
     }
 
-    /// Generate new instace with a new communication model id. (Only needed for custom communication model implementation)
-    ///
-    /// This is only needed in case you are implementing your own communication model. It will retain all fields of the metadata
-    /// except for the communication model identifier given as the parameter
-    pub fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
-        Self {
-            modelid: Some(model_id),
-            ..self
-        }
-    }
-
-    /// Qurey the stored message id
-    pub fn message_id(&self) -> &MessageId {
+    /// Qurey the stored message id if stored
+    pub fn message_id(&self) -> &Option<MessageId> {
         &self.messageid
     }
 
-    /// Query the stored convesation id
-    pub fn conversation_id(&self) -> &ConversationId {
+    /// Query the stored convesation if stored
+    pub fn conversation_id(&self) -> &Option<ConversationId> {
         &self.conversationid
     }
 
@@ -536,12 +665,12 @@ pub trait Message: Sized {
     }
 
     /// Query the message identifier from the stored metadata
-    fn message_id(&self) -> &MessageId {
+    fn message_id(&self) -> &Option<MessageId> {
         self.metadata().message_id()
     }
 
     /// Query the conversation identifier from the stored metadata
-    fn conversation_id(&self) -> &ConversationId {
+    fn conversation_id(&self) -> &Option<ConversationId> {
         self.metadata().conversation_id()
     }
 
@@ -565,31 +694,61 @@ pub trait Message: Sized {
         self.metadata().part()
     }
 
+    /// Generate new instance with new message identifier in the stored metadata but keeping the payload
+    fn apply_message_id(self, message_id: MessageId) -> Self {
+        self.mutated_metadata(|x| x.apply_message_id(message_id))
+    }
+
+    /// Generate new instance with new random message identifier in the stored metadata but keeping the payload
+    fn apply_random_message_id(self) -> Self {
+        self.mutated_metadata(|x| x.apply_random_message_id())
+    }
+
+    /// Generate new instance with with ensured random message identifier (kept if already set) in the stored metadata but keeping the payload
+    fn ensure_random_message_id(self) -> Self {
+        self.mutated_metadata(|x| x.ensure_random_message_id())
+    }
+
+    /// Generate new instance with new conversation identifier in the stored metadata but keeping the payload
+    fn apply_conversation_id(self, conversation_id: ConversationId) -> Self {
+        self.mutated_metadata(|x| x.apply_conversation_id(conversation_id))
+    }
+
+    /// Generate new instance with new random conversation identifier in the stored metadata but keeping the payload
+    fn apply_random_conversation_id(self) -> Self {
+        self.mutated_metadata(|x| x.apply_random_conversation_id())
+    }
+
+    /// Generate new instance with with ensured random conversation identifier (kept if already set) in the stored metadata but keeping the payload
+    fn ensure_random_conversation_id(self) -> Self {
+        self.mutated_metadata(|x| x.ensure_random_conversation_id())
+    }
+
     /// Generate new instance with new peer identifier in the stored metadata but keeping the payload
     fn apply_peer_id(self, peer_id: PeerId) -> Self {
-        self.mutated_metadata(|x| x.applied_peer_id(peer_id))
+        self.mutated_metadata(|x| x.apply_peer_id(peer_id))
     }
 
     /// Generate new instance with new communication model identifier in metadata but keeping everything else
-    fn commit_communication_model_id(self, model_id: CommunicationModelId) -> Self {
-        self.mutated_metadata(|metadata| metadata.commit_communication_model_id(model_id))
+    fn apply_communication_model_id(self, model_id: CommunicationModelId) -> Self {
+        self.mutated_metadata(|metadata| metadata.apply_communication_model_id(model_id))
     }
 
     /// Generate new instance by continuing metadata exchange and with the given payload
-    fn continue_exchange(self, payload: Self::Payload) -> Self
+    fn continue_conversation(self, payload: Self::Payload) -> Self
     where
         Self: Sized,
     {
         let metadata = self.into_metadata();
-        Self::with_metadata(metadata.continue_exchange(), payload)
+        Self::with_metadata(metadata.continue_conversation(), payload)
     }
 
     /// Generate new instance by keeping payload and continuing metadata exchange
-    fn continue_exchange_metadata(self, meta: MessageMetadata) -> Self
+    fn continue_conversation_from_metadata(self, metadata: MessageMetadata) -> Self
     where
         Self: Sized,
     {
-        Self::with_metadata(meta.continue_exchange(), self.into_payload())
+        Self::with_metadata(metadata.continue_conversation(), self.into_payload())
     }
 }
 

@@ -76,7 +76,7 @@ impl ConnectionTracker {
         if self.peers.contains(&peer_id) {
             Ok(())
         } else {
-            Err((Some(peer_id), SocketInternalError::UnrelatedPeer))
+            Err((Some(peer_id), SocketInternalError::SocketUnrelatedPeer))
         }
     }
 
@@ -84,7 +84,7 @@ impl ConnectionTracker {
         if self.peers.remove(&peer_id) {
             Ok(())
         } else {
-            Err(SocketInternalError::UnknownPeer)
+            Err(SocketInternalError::SocketUnknownPeer)
         }
     }
 }
@@ -189,7 +189,7 @@ where
                     .lock()
                     .unwrap()
                     .check_peer_connected(
-                        message.peer_id().ok_or((None, SocketError::UnknownPeer))?,
+                        message.peer_id().ok_or((None, SocketError::SocketUnknownPeer))?,
                     )
                     .map_err(|(peerid, err)| (peerid, SocketError::from(err)))?;
                 Ok(message)
@@ -256,7 +256,7 @@ where
     T: AcceptorTransport,
 {
     fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let processed_message = message.commit_communication_model_id(PUBLISHER_MODELID);
+        let processed_message = message.apply_communication_model_id(PUBLISHER_MODELID);
         let message_metadata = processed_message.metadata().clone();
         for peer_id in self.transport.query_connected_peers().iter() {
             self.transport.send(

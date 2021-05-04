@@ -117,7 +117,7 @@ fn simple_req_rep_ssl_test() {
             OpFlag::Wait,
             |rmessage: TypedMessage<TestingStruct>| {
                 TypedMessage::new(rmessage.payload().clone())
-                    .continue_exchange_metadata(rmessage.into_metadata())
+                    .continue_conversation_from_metadata(rmessage.into_metadata())
             },
         )
         .unwrap();

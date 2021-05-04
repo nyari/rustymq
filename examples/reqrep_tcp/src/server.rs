@@ -45,7 +45,7 @@ impl<Socket> OperationServer<Socket>
                             let (peer_id, conversation_id) = (metadata.peer_id().unwrap().clone(), metadata.conversation_id().clone());
 
                             // Print out peer and conversation id
-                            println!("Received:   Peer: {}\tConversation: {}", peer_id.get(), conversation_id.get());
+                            println!("Received:   Peer: {}\tConversation: {}", peer_id.get(), conversation_id.unwrap().get());
 
                             // Calculate the response to the message
                             let response = match input.0 {
@@ -54,14 +54,14 @@ impl<Socket> OperationServer<Socket>
                             };
 
                             // Print out peer and conversation id
-                            println!("Responding: Peer: {}\tConversation: {}", peer_id.get(), conversation_id.get());
+                            println!("Responding: Peer: {}\tConversation: {}", peer_id.get(), conversation_id.unwrap().get());
 
                             // Create the response for the message
                             TypedMessage::new(data::TimedOperation(response, input.1))
                                 // We have to explicitly continue the conversion with the metadata
                                 // this is needed because the internal message tracking of the `ReplySocket` will result in an error
                                 // if the `conversation_id` from the original metadata is not carried forward
-                                .continue_exchange_metadata(metadata)
+                                .continue_conversation_from_metadata(metadata)
                         }).unwrap();
                     }
                 }))
