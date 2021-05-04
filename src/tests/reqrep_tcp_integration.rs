@@ -1,10 +1,6 @@
 use super::common::*;
 
-use crate::base::{
-    BidirectionalSocket, InwardSocket, Message, MessageMetadata, NetworkAddress, OpFlag,
-    OutwardSocket, QueryTypedError, ReceiveTypedError, SendTypedError, Socket, SocketError,
-    TransportMethod, TypedMessage,
-};
+use crate::base::{BidirectionalSocket, InwardSocket, Message, MessageMetadata, NetworkAddress, OpFlag, OutwardSocket, QueryTypedError, ReceiveTypedError, SendTypedError, Socket, SocketError, TransportMethod, TypedMessage};
 use crate::model;
 use crate::transport;
 use std::collections::HashMap;
@@ -44,7 +40,7 @@ fn simple_req_rep_tcp_test() {
             OpFlag::Wait,
             |rmessage: TypedMessage<TestingStruct>| {
                 TypedMessage::new(rmessage.payload().clone())
-                    .continue_exchange_metadata(rmessage.into_metadata())
+                    .continue_conversation_from_metadata(rmessage.into_metadata())
             },
         )
         .unwrap();
@@ -89,7 +85,7 @@ fn stress_simple_req_rep_tcp_test() {
                 let (metadata, mut payload) = rmessage.into_parts();
                 payload.a *= 2;
                 payload.b *= 7;
-                TypedMessage::new(payload).continue_exchange_metadata(metadata)
+                TypedMessage::new(payload).continue_conversation_from_metadata(metadata)
             },
         ) {
             Ok(())
@@ -109,8 +105,8 @@ fn stress_simple_req_rep_tcp_test() {
 
     for index in 0..1000 {
         let base = TestingStruct { a: index, b: index };
-        let message = TypedMessage::new(base);
-        messages.insert(message.conversation_id().clone(), base);
+        let message = TypedMessage::new(base).ensure_random_conversation_id();
+        messages.insert(message.conversation_id().unwrap(), base);
         requestor.send_typed(message, OpFlag::NoWait).unwrap();
     }
 
@@ -119,7 +115,7 @@ fn stress_simple_req_rep_tcp_test() {
             .receive_typed::<TestingStruct>(OpFlag::Wait)
             .expect("Hello");
         let (metadata, payload) = final_message.into_parts();
-        let original_payload = messages.get(metadata.conversation_id()).unwrap();
+        let original_payload = messages.get(&metadata.conversation_id().unwrap()).unwrap();
         assert_eq!(original_payload.a * 2, payload.a);
         assert_eq!(original_payload.b * 7, payload.b);
     }

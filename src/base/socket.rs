@@ -24,46 +24,48 @@ pub enum OpFlag {
 #[derive(Debug, Clone)]
 pub enum SocketError {
     /// Signals if the socket is not in the correct state to process the requested operation
-    IncorrectStateError,
-    /// The specified peer identifier in [`MessageMetadata`] is unkown by the
-    UnrelatedPeer,
+    SocketIncorrectStateError,
+    /// The specified peer identifier in [`MessageMetadata`] is unkown by the socket
+    SocketUnrelatedPeer,
     /// The specified conversation in the [`MessageMetadata`] is not known by the socket
-    UnrelatedConversation,
+    SocketUnrelatedConversation,
     /// The specified conversation part in the [`MessageMetadata`] is not known by the socket
-    UnrelatedConversationPart,
+    SocketUnrelatedConversationPart,
+    /// The [`MessageMetadata`] does not contain the conversation identifier although it is required
+    SocketConversationIdentifierMissing,
     /// The internal gueue in [`Socket`] or Transport has reached its limit
-    QueueDepthReached,
+    TransportQueueDepthReached,
     /// Integrity checks on transport layer failed
-    TransportIntegrityError,
+    TransportIntegrityFatalError,
     /// The target peer identifier is not specified in the [`MessageMetadata`] and cannot be inferred
-    UnknownPeer,
+    SocketUnknownPeer,
     /// The specific [`TransportMethod`] is already used by the socket
     TransportMethodAlreadyInUse,
     /// The specific [`TransportMethod`] cannot be found, cannot be connected to
-    TransportTargetUnreachable,
+    TransportMethodTargetUnreachable,
     /// The tharget peer specified in [`MessageMetadata`] disconnected
     Disconnected,
     /// The tharget specified in [`TransportMethod`] refused the connection
     ConnectionRefused,
-    /// The operation timed out
+    /// The operation timed out, or NoWait operation did not yield result
     Timeout,
     /// The connected peer has an incompatible version or communication model
     IncompatiblePeer,
     /// Handshake with the target peer failed
-    HandshakeFailed,
+    TransportHandshakeFailed,
     /// The [`OpFlag`] specified for the [`InwardSocket`] or [`OutwardSocket`] operation is not supprted by
     /// the socket or the underlieing Transport
     UnsupportedOpFlag(OpFlag),
     /// DNS domain name required but not available in NetworkAddress
-    MissingDNSDomain,
+    TransportMissingDNSDomainName,
     /// The [`TransportMethod`] is not supported by the Transport
-    InvalidTransportMethod,
+    TransportMethodNotSupported,
     /// The connection already exists
     AlreadyConnected,
     /// The requested operation is not supported by socket
     NotSupportedOperation,
     /// Could not connect to address provided by [`TransportMethod`]
-    CouldNotConnect,
+    TransoportCouldNotConnect,
 }
 
 /// Identifier for a peer
@@ -221,7 +223,7 @@ pub trait BidirectionalSocket: OutwardSocket + InwardSocket {
     ) -> Result<(), (Option<PeerId>, SocketError)> {
         let query = self.receive(receive_flags)?;
         let query_metadata = query.metadata().clone();
-        let response = processor(query).continue_exchange_metadata(query_metadata);
+        let response = processor(query).continue_conversation_from_metadata(query_metadata);
         self.send(response, send_flags)
             .map_err(|error| (None, error))?;
         Ok(())

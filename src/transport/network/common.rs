@@ -174,7 +174,7 @@ impl NetworkConnectionPeerManager {
                 self.commit_onnection(connection, addr.get_address(), peer_id.clone());
                 Ok(peer_id)
             }
-            Err(_) => Err(SocketInternalError::CouldNotConnect),
+            Err(_) => Err(SocketInternalError::TransoportCouldNotConnect),
         }
     }
 
@@ -218,7 +218,7 @@ impl NetworkConnectionPeerManager {
             let peer = tables
                 .peer_thread
                 .get_mut(peer_id)
-                .ok_or(SocketInternalError::UnknownPeer)?;
+                .ok_or(SocketInternalError::SocketUnknownPeer)?;
             peer.check_worker_state()
         };
 
@@ -298,7 +298,7 @@ impl NetworkConnectionPeerManager {
                 tables
                     .peer_thread
                     .remove(&peer_id)
-                    .ok_or(SocketInternalError::UnknownPeer)?;
+                    .ok_or(SocketInternalError::SocketUnknownPeer)?;
                 let address = tables.peers.remove(&peer_id).unwrap();
                 tables.addresses.remove(&address).unwrap();
                 Ok(None)
@@ -307,12 +307,12 @@ impl NetworkConnectionPeerManager {
                 let peer_id = tables
                     .addresses
                     .remove(&addr.get_address())
-                    .ok_or(SocketInternalError::UnknownPeer)?;
+                    .ok_or(SocketInternalError::SocketUnknownPeer)?;
                 tables.peers.remove(&peer_id).unwrap();
                 tables.peer_thread.remove(&peer_id).unwrap();
                 Ok(Some(peer_id))
             }
-            _ => Err(SocketInternalError::UnknownPeer),
+            _ => Err(SocketInternalError::SocketUnknownPeer),
         }
     }
 
@@ -323,13 +323,13 @@ impl NetworkConnectionPeerManager {
         match peer_id {
             Some(peerid) => match table.get_mut(&peerid) {
                 Some(connection) => Ok(connection),
-                None => Err(SocketInternalError::UnknownPeer),
+                None => Err(SocketInternalError::SocketUnknownPeer),
             },
             None => {
                 if table.len() == 1 {
                     Ok(table.values_mut().next().unwrap())
                 } else {
-                    Err(SocketInternalError::UnknownPeer)
+                    Err(SocketInternalError::SocketUnknownPeer)
                 }
             }
         }
@@ -354,7 +354,7 @@ impl NetworkConnectionPeerManager {
             Ok(connection) => {
                 Ok(self.commit_onnection(connection, address.get_address(), peer_id.clone()))
             }
-            Err(_) => Err(SocketInternalError::CouldNotConnect),
+            Err(_) => Err(SocketInternalError::TransoportCouldNotConnect),
         }?;
 
         Ok(peer_id)
@@ -521,7 +521,7 @@ impl<Builder: NetworkStreamConnectionBuilder> InitiatorTransport
             TransportMethod::Network(address) => {
                 Ok(Some(self.manager.connect(self.builder.clone(), address)?))
             }
-            _ => Err(SocketError::InvalidTransportMethod),
+            _ => Err(SocketError::TransportMethodNotSupported),
         }
     }
 }
@@ -695,7 +695,7 @@ where
             }));
             Ok(None)
         } else {
-            Err(SocketError::InvalidTransportMethod)
+            Err(SocketError::TransportMethodNotSupported)
         }
     }
 }

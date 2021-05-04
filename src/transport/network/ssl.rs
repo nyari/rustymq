@@ -140,7 +140,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
     ) -> Result<stream::ReadWriteStreamConnection<Self::Stream>, SocketInternalError> {
         let dns_address = addr
             .get_dns_name()
-            .ok_or(SocketInternalError::MissingDNSDomain)?;
+            .ok_or(SocketInternalError::TransportMissingDNSDomainName)?;
         let stream = net::TcpStream::connect(addr.get_address())?;
 
         match self.connector.connect(dns_address.as_str(), stream) {
@@ -159,7 +159,7 @@ impl NetworkStreamConnectionBuilder for StreamConnectionBuilder {
                     peer_id,
                 ))
             }
-            Err(_) => Err(SocketInternalError::HandshakeFailed),
+            Err(_) => Err(SocketInternalError::TransportHandshakeFailed),
         }
     }
 

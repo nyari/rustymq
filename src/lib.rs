@@ -40,7 +40,7 @@
 //!     requestor.send(message, OpFlag::NoWait).unwrap();
 //!     
 //!     replier.respond(OpFlag::Wait, OpFlag::Wait, |rmessage:RawMessage| {
-//!         RawMessage::new(rmessage.payload().clone()).continue_exchange_metadata(rmessage.into_metadata())
+//!         RawMessage::new(rmessage.payload().clone()).continue_conversation_from_metadata(rmessage.into_metadata())
 //!     }).unwrap();
 //!     
 //!     assert_eq!(payload, requestor.receive(OpFlag::Wait).unwrap().into_payload());
