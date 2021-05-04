@@ -1,12 +1,13 @@
-//! # Transport core module
+//! # Transport base module
 //! Module containing interface and type definitions for transport methods that can be implemented in RustyMQ
 pub mod network;
 
 pub use self::network::NetworkAddress;
 
-use core::config::TransportConfiguration;
-use core::message::{PeerId, RawMessage};
-use core::socket::{OpFlag, PeerIdentification, SocketError};
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{PeerId, RawMessage};
+use crate::base::socket::{OpFlag, PeerIdentification, SocketError};
+
 use std::any;
 use std::collections::HashSet;
 
@@ -16,8 +17,14 @@ use std::collections::HashSet;
 pub enum TransportMethod {
     /// Connect through network
     Network(NetworkAddress),
-    /// Allow implementation of custom transport methods
+    /// Allow implementation of custom transport methods to be used by custom [`Transport`] implementation
     Custom(Box<dyn any::Any>),
+}
+
+impl From<NetworkAddress> for TransportMethod {
+    fn from(value: NetworkAddress) -> Self {
+        TransportMethod::Network(value)
+    }
 }
 
 /// # Transport

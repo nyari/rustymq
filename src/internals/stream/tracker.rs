@@ -1,5 +1,5 @@
-use core::message::RawMessage;
-use core::stream::header::{HeadedMessage, Header, HeaderOperation};
+use crate::base::message::RawMessage;
+use crate::internals::stream::header::{HeadedMessage, Header, HeaderOperation};
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};

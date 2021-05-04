@@ -1,6 +1,6 @@
-use core::message::{Buffer, BufferSlice, SerializableMessagePayload};
-use core::serializer;
-use core::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializer};
+use crate::base::{Buffer, BufferSlice, SerializableMessagePayload};
+use crate::internals::serializer;
+use crate::internals::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializer};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct TestingStruct {

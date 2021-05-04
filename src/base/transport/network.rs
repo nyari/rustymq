@@ -1,11 +1,12 @@
-//! # Network transport core
+//! # Network transport base module
 //! Module containing the datastructures for specifiyng peers through network
-use core::util::SingleIter;
+use crate::internals::util::SingleIter;
+
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::string::String;
 
-/// #NetworkAddress
+/// # NetworkAddress
 /// Contains the IP address and/or domain name of the peer to connect to
 #[derive(Debug, Clone)]
 pub struct NetworkAddress {

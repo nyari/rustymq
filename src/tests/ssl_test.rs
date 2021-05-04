@@ -5,9 +5,7 @@ use super::common::*;
 use openssl;
 use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
 
-use core::message::{Message, TypedMessage};
-use core::socket::{BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, Socket};
-use core::transport::NetworkAddress;
+use crate::base::{Message, TypedMessage, BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, Socket, NetworkAddress, TransportMethod};
 use std::sync::Arc;
 
 fn get_private_key() -> openssl::pkey::PKey<openssl::pkey::Private> {
@@ -99,12 +97,12 @@ fn simple_req_rep_ssl_test() {
     .unwrap();
 
     replier
-        .bind(core::TransportMethod::Network(
+        .bind(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45432".to_string()).unwrap(),
         ))
         .unwrap();
     requestor
-        .connect(core::TransportMethod::Network(
+        .connect(TransportMethod::Network(
             NetworkAddress::from_dns("localhost:45432".to_string()).unwrap(),
         ))
         .unwrap();

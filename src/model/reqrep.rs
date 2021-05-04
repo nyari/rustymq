@@ -5,19 +5,22 @@
 //! The [`RequestSocket`] can be used to send requests to the reply sockets.
 //! ## Example
 //! ```rust
-//! use rustymq::core::socket::{Socket, InwardSocket, OutwardSocket, OpFlag, BidirectionalSocket};
-//! use rustymq::core::message::{Message, RawMessage};
-//! use rustymq::core::transport::{TransportMethod, NetworkAddress};
-//! use rustymq::model::reqrep::{RequestSocket, ReplySocket};
+//! use rustymq::base::{Socket, InwardSocket, OutwardSocket, OpFlag, BidirectionalSocket,
+//!                     Message, RawMessage,
+//!                     TransportMethod, NetworkAddress};
+//! use rustymq::model::{RequestSocket, ReplySocket};
 //! use rustymq::transport::network::tcp;
 //! # fn main() {
 //!
-//! let replier = ReplySocket::new(tcp::AcceptorTransport::new(tcp::StreamConnectionBuilder::new(),
-//!                                                            tcp::StreamListenerBuilder::new())).unwrap();
+//! let replier = ReplySocket::new(
+//!                 tcp::AcceptorTransport::new(
+//!                     tcp::StreamConnectionBuilder::new(),
+//!                     tcp::StreamListenerBuilder::new()))
+//!               .unwrap();
 //! let requestor = RequestSocket::new(tcp::InitiatorTransport::new(tcp::StreamConnectionBuilder::new())).unwrap();
 //!
-//! replier.bind(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
-//! requestor.connect(TransportMethod::Network(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap()));
+//! replier.bind(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap().into());
+//! requestor.connect(NetworkAddress::from_dns("localhost:13000".to_string()).unwrap().into());
 //!
 //! // Make sure that TCP connection is established otherwise the first sent message might not arrive
 //! std::thread::sleep(std::time::Duration::from_millis(100));
@@ -26,7 +29,7 @@
 //! let response_payload_requirement: Vec<u8> = vec![2u8, 8u8, 16u8, 32u8];
 //!
 //! requestor.send(RawMessage::new(request_payload.clone()), OpFlag::Wait);
-//! replier.respond(OpFlag::Wait, OpFlag::Wait, move |message| {
+//! replier.respond(OpFlag::Wait, OpFlag::Wait, |message| {
 //!     let mut payload = message.into_payload();
 //!     let reply_payload_extend: Vec<u8> = vec![16u8, 32u8];
 //!     payload.extend(reply_payload_extend.into_iter());
@@ -38,16 +41,17 @@
 //! # }
 //! ```
 
-use core::config::TransportConfiguration;
-use core::message::{
+use crate::base::config::TransportConfiguration;
+use crate::base::message::{
     ConversationId, Message, MessageMetadata, Part, PartError, PeerId, RawMessage,
 };
-use core::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
-use core::socket::{
+use crate::base::queue::{MessageQueueOverflowHandling, MessageQueueingPolicy};
+use crate::base::socket::{
     BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, PeerIdentification, Socket,
-    SocketError, SocketInternalError,
+    SocketError,
 };
-use core::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
+use crate::base::transport::{AcceptorTransport, InitiatorTransport, Transport, TransportMethod};
+use crate::internals::socket::SocketInternalError;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

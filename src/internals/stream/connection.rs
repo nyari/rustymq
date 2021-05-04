@@ -1,11 +1,13 @@
-use core::message::{Message, PeerId, RawMessage};
-use core::queue::{MessageQueueError, MessageQueueReceiver, MessageQueueSender, SenderReceipt};
-use core::socket::SocketInternalError;
-use core::stream;
-use core::stream::header::HeadedMessage;
-use core::stream::tracker::Tracker;
-use core::util::thread::{Semaphore, Sleeper};
-use core::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
+use crate::base::message::{Message, PeerId, RawMessage};
+use crate::base::queue::MessageQueueError;
+use crate::internals::queue::{MessageQueueReceiver, MessageQueueSender, SenderReceipt};
+use crate::internals::socket::SocketInternalError;
+use crate::internals::stream;
+use crate::internals::stream::header::HeadedMessage;
+use crate::internals::stream::tracker::Tracker;
+use crate::internals::util::thread::{Sleeper};
+use crate::internals::util::sync::{Semaphore};
+use crate::internals::util::time::{DurationBackoffWithDebounce, LinearDurationBackoff};
 
 use std::collections::VecDeque;
 use std::io;

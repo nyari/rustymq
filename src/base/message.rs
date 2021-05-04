@@ -5,16 +5,24 @@
 //! This module containts the definition of Messages, which are a core concept of RustyMQ.
 //! All the datastructures, traits and enums needed to compose messages for sending and then
 //! receiving are defined here
-use core::serializer;
-use core::serializer::{Deserializer, FlatDeserializer, FlatSerializer, Serializable, Serializer};
+use crate::base::info::Identifier;
+use crate::internals::serializer;
+use crate::internals::serializer::{
+    Deserializer, FlatDeserializer, FlatSerializer, Serializable, Serializer,
+};
+
 use std;
 use std::convert::TryFrom;
 use std::ops::{Deref, DerefMut};
 
-pub use core::serializer::{Buffer, BufferSlice};
-use core::util::Identifier;
-
 const MESSAGE_METADATA_VERSION: u8 = 0u8;
+
+/// General buffer type to be used in RusyMQ
+pub type Buffer = Vec<u8>;
+/// General buffer slice type to be used in RustyMQ
+pub type BufferSlice<'a> = &'a [u8];
+/// General buffer mutable slice type to be used in RustyMQ
+pub type BufferMutSlice<'a> = &'a mut [u8];
 
 /// # Multipart message part identifier
 /// Enum for tracking multipart messages
@@ -35,7 +43,7 @@ impl Part {
     /// Generate new instance for a single message without multiple aprts
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let original = Part::single();
     /// assert!(std::matches!(original, Part::Single));
@@ -48,7 +56,7 @@ impl Part {
     /// Generate a new instance for trackinga multipart message
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
@@ -90,7 +98,7 @@ impl Part {
     /// Generate new instance for multipart message metadata with advancing the part id by one
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
@@ -110,7 +118,7 @@ impl Part {
     /// Generate new instance keeping the part index but change to final message
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
@@ -130,7 +138,7 @@ impl Part {
     /// Generate new instance keeping the part index but change to final message
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let original = Part::start_multipart();
     /// assert!(std::matches!(original, Part::Intermediate(0)));
@@ -151,7 +159,7 @@ impl Part {
     /// This is used to update the part index to the one in other if it is the next consecutive one
     /// ## Examples
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::start_multipart();
     ///
@@ -162,7 +170,7 @@ impl Part {
     /// # }
     /// ```
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::start_multipart();
     ///
@@ -172,7 +180,7 @@ impl Part {
     /// # }
     /// ```
     /// ```rust
-    /// # use rustymq::core::{Part, PartError};
+    /// # use rustymq::base::{Part, PartError};
     /// # fn main() {
     /// let mut original = Part::Final(2);
     ///
@@ -282,7 +290,7 @@ impl MessageMetadata {
     /// * Part tracker set to None
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     ///
@@ -308,8 +316,8 @@ impl MessageMetadata {
     /// * Part tracker set to Part::Intermediate(0)
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::MessageMetadata;
-    /// # use rustymq::core::Part;
+    /// # use rustymq::base::MessageMetadata;
+    /// # use rustymq::base::Part;
     /// # fn main() {
     /// let metadata = MessageMetadata::new_multipart();
     ///
@@ -329,7 +337,7 @@ impl MessageMetadata {
     /// This method will commit the peer identifier given to the metadata but retain all the other fields
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part, PeerId};
+    /// # use rustymq::base::{MessageMetadata, Part, PeerId};
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     /// assert!(std::matches!(metadata.peer_id(), None));
@@ -352,7 +360,7 @@ impl MessageMetadata {
     /// retaining all other fields
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let metadata = MessageMetadata::new();
     /// assert!(std::matches!(metadata.part(), Part::Single));
@@ -373,7 +381,7 @@ impl MessageMetadata {
     /// This method will retain all fields of the metadata except for the message identifier and part
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new();
     /// let original_converstion_id = original.conversation_id().clone();
@@ -437,7 +445,7 @@ impl MessageMetadata {
     /// Generate new instance for multipart message metadata with advancing the part id by one
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
@@ -456,7 +464,7 @@ impl MessageMetadata {
     /// Generate new instance for multipart message metadata without advancing the part id and changing it to final
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));
@@ -475,7 +483,7 @@ impl MessageMetadata {
     /// Generate new instance for multipart message metadata with advancing the part id and changing it to final
     /// ## Example
     /// ```rust
-    /// # use rustymq::core::{MessageMetadata, Part};
+    /// # use rustymq::base::{MessageMetadata, Part};
     /// # fn main() {
     /// let original = MessageMetadata::new_multipart();
     /// assert!(std::matches!(original.part(), Part::Intermediate(0)));

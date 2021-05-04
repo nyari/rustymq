@@ -4,3 +4,6 @@
 
 pub mod pubsub;
 pub mod reqrep;
+
+pub use self::pubsub::{PublisherSocket, SubscriberSocket};
+pub use self::reqrep::{ReplySocket, RequestSocket};

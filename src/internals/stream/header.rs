@@ -1,6 +1,7 @@
-use core::message::RawMessage;
-use core::serializer;
-use core::serializer::{Deserializer, Serializable, Serializer};
+use crate::base::message::RawMessage;
+use crate::internals::serializer;
+use crate::internals::serializer::{Deserializer, Serializable, Serializer};
+
 const STREAM_HEADER_VERSION: u8 = 0u8;
 
 pub enum HeaderOperation {
