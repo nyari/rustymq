@@ -1,6 +1,6 @@
 # RustyMQ
 
-![Build status](https://travis-ci.org/nyari/rustymq.svg?branch=main)
+[![Build Status](https://jenkinsci.dnyari.info/buildStatus/icon?job=RustyMQ)](https://jenkinsci.dnyari.info/job/RustyMQ/)
 
 ## Introduction
 RustMQ is an IPC (inter-process communication) framework written using minimal dependencies for the Rust language. Intended to be easily extended and customized, but also provides its own implementations.
