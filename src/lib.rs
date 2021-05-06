@@ -54,6 +54,9 @@ extern crate rand;
 #[cfg(feature = "network-openssl-socket-support")]
 extern crate openssl;
 
+#[cfg(all(target_family = "unix", feature = "systemv-support"))]
+extern crate libc;
+
 pub mod base;
 pub mod internals;
 pub mod model;
