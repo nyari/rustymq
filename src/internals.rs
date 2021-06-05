@@ -9,3 +9,6 @@ pub mod stream;
 
 #[allow(dead_code)]
 pub mod util;
+
+#[cfg(all(target_family = "unix", feature = "systemv-support"))]
+pub mod slibc;
