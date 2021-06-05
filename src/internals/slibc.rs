@@ -58,23 +58,23 @@ pub enum SharedMemoryError {
 
 
 #[derive(Clone)]
-pub struct SharedMemoryHandle {
+pub struct SharedMemoryBuilder {
     id: ShmId,
     size: libc::size_t
 }
 
-impl SharedMemoryHandle {
-    pub fn new_private(size: libc::size_t, flags: libc::c_int) -> Result<Self, Error> {
+impl SharedMemoryBuilder {
+    pub fn new_private(size: libc::size_t) -> Result<Self, Error> {
         Ok(Self {
-            id: shmget(FToken(libc::IPC_PRIVATE), size, flags | libc::IPC_CREAT | libc::IPC_EXCL)?,
+            id: shmget(FToken(libc::IPC_PRIVATE), size, libc::IPC_CREAT | libc::IPC_EXCL)?,
             size: size
         })
     }
 
-    pub fn new(path: &str, proj_id: libc::c_int, size: libc::size_t, flags: libc::c_int) -> Result<Self, Error> {
+    pub fn new(path: &str, proj_id: libc::c_int, size: libc::size_t) -> Result<Self, Error> {
         let key = ftok(path, proj_id)?;
         Ok(Self {
-            id: shmget(key, size, flags)?,
+            id: shmget(key, size, libc::IPC_CREAT)?,
             size: size
         })
     }
@@ -87,7 +87,7 @@ impl SharedMemoryHandle {
 
 pub struct MutableSharedMemory {
     mem: *mut u8,
-    handle: SharedMemoryHandle
+    handle: SharedMemoryBuilder
 }
 
 impl Clone for MutableSharedMemory {
