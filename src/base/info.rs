@@ -8,26 +8,22 @@ use rand;
 /// # Identifier
 /// Used as an identifier in messages as peer and other identifiers
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-pub struct Identifier {
-    core: u64,
-}
+pub struct Identifier(u64);
 
 impl Identifier {
     /// Create a new identifier from seed
     pub fn new(core: u64) -> Self {
-        Self { core: core }
+        Self(core)
     }
 
     /// Create a random identifier
     pub fn new_random() -> Self {
-        Self {
-            core: rand::random(),
-        }
+        Self(rand::random())
     }
 
     /// Query internal state of identifier
     pub fn get(&self) -> u64 {
-        self.core.clone()
+        self.0.clone()
     }
 }
 
@@ -69,7 +65,7 @@ impl VersionInfo {
 
 impl Serializable for Identifier {
     fn serialize<T: Serializer>(&self, serializer: &mut T) {
-        serializer.serialize(&self.core);
+        serializer.serialize(&self.0);
     }
     fn deserialize<T: Deserializer>(deserializer: &mut T) -> Result<Self, serializer::Error> {
         Ok(Self::new(deserializer.deserialize()?))
