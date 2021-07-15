@@ -5,7 +5,6 @@ pub mod network;
 #[cfg(all(target_family = "unix", feature = "systemv-support"))]
 use std::path::Path;
 
-
 pub use self::network::NetworkAddress;
 
 use crate::base::config::TransportConfiguration;

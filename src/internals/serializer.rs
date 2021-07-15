@@ -294,7 +294,7 @@ impl<'a> BareFlatDeserializer<'a> {
     pub fn new(buffer: BufferSlice<'a>) -> Self {
         Self {
             buffer: buffer,
-            offset: 0
+            offset: 0,
         }
     }
 }
@@ -321,7 +321,6 @@ impl<'a> Deserializer for BareFlatDeserializer<'a> {
         false
     }
 }
-
 
 #[inline]
 fn sized_to_byte_slice<'a, T: Sized>(value: &'a T) -> BufferSlice<'a> {
