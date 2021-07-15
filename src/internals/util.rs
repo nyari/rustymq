@@ -2,9 +2,9 @@
 //! The module contains miscellaneous datastructures and functionalities
 //! used by RustyMQ
 
-pub mod time;
 pub mod sync;
 pub mod thread;
+pub mod time;
 
 use std;
 /// Iterate through single element
@@ -24,4 +24,3 @@ impl<T> std::iter::Iterator for SingleIter<T> {
         self.item.take()
     }
 }
-

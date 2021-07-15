@@ -142,7 +142,11 @@ impl ConnectionTracker {
         conversation_map: &mut HashMap<ConversationId, ConnTrackerState>,
         message: RawMessage,
     ) -> Result<RawMessage, SocketInternalError> {
-        match conversation_map.get_mut(&message.conversation_id().ok_or(SocketInternalError::SocketConversationIdentifierMissing)?) {
+        match conversation_map.get_mut(
+            &message
+                .conversation_id()
+                .ok_or(SocketInternalError::SocketConversationIdentifierMissing)?,
+        ) {
             Some(state) => match state.clone() {
                 ConnTrackerState::RequestMessage(part) if part.is_continueable() => {
                     if let ConnTrackerState::RequestMessage(part) = state {
@@ -178,7 +182,11 @@ impl ConnectionTracker {
         conversation_map: &mut HashMap<ConversationId, ConnTrackerState>,
         message: RawMessage,
     ) -> Result<RawMessage, SocketInternalError> {
-        match conversation_map.get_mut(&message.conversation_id().ok_or(SocketInternalError::SocketConversationIdentifierMissing)?) {
+        match conversation_map.get_mut(
+            &message
+                .conversation_id()
+                .ok_or(SocketInternalError::SocketConversationIdentifierMissing)?,
+        ) {
             Some(state) => match state.clone() {
                 ConnTrackerState::RequestMessage(part) if part.is_last() => {
                     if message.part().is_initial() {
@@ -198,7 +206,9 @@ impl ConnectionTracker {
                                 _ => SocketInternalError::SocketUnrelatedConversationPart,
                             })?;
                         if part.is_last() {
-                            conversation_map.remove(&message.conversation_id().unwrap()).unwrap();
+                            conversation_map
+                                .remove(&message.conversation_id().unwrap())
+                                .unwrap();
                         }
                     } else {
                         panic!("Internal error! Impossible case handled")
@@ -356,8 +366,9 @@ where
     T: InitiatorTransport,
 {
     fn send(&self, message: RawMessage, flags: OpFlag) -> Result<MessageMetadata, SocketError> {
-        let request_message = message.apply_communication_model_id(REQUEST_MODELID)
-                                               .ensure_random_conversation_id();
+        let request_message = message
+            .apply_communication_model_id(REQUEST_MODELID)
+            .ensure_random_conversation_id();
         let metadata = request_message.metadata().clone();
         let message = {
             let mut tracker = self.tracker.lock().unwrap();
@@ -497,7 +508,11 @@ mod tests {
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
         let request = tracker
-            .handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer).ensure_random_conversation_id())
+            .handle_request_message(
+                RawMessage::new(vec![])
+                    .apply_peer_id(peer)
+                    .ensure_random_conversation_id(),
+            )
             .unwrap();
         tracker.handle_reply_message(request).unwrap();
     }
@@ -508,7 +523,11 @@ mod tests {
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
         let request = tracker
-            .handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer).ensure_random_conversation_id())
+            .handle_request_message(
+                RawMessage::new(vec![])
+                    .apply_peer_id(peer)
+                    .ensure_random_conversation_id(),
+            )
             .unwrap();
         assert!(std::matches!(
             tracker.handle_request_message(request),
@@ -522,7 +541,11 @@ mod tests {
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
         let request = tracker
-            .handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer).ensure_random_conversation_id())
+            .handle_request_message(
+                RawMessage::new(vec![])
+                    .apply_peer_id(peer)
+                    .ensure_random_conversation_id(),
+            )
             .unwrap();
         let reply = tracker.handle_reply_message(request).unwrap();
         assert!(std::matches!(
@@ -537,10 +560,18 @@ mod tests {
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
         let request1 = tracker
-            .handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer).ensure_random_conversation_id())
+            .handle_request_message(
+                RawMessage::new(vec![])
+                    .apply_peer_id(peer)
+                    .ensure_random_conversation_id(),
+            )
             .unwrap();
         let request2 = tracker
-            .handle_request_message(RawMessage::new(vec![]).apply_peer_id(peer).ensure_random_conversation_id())
+            .handle_request_message(
+                RawMessage::new(vec![])
+                    .apply_peer_id(peer)
+                    .ensure_random_conversation_id(),
+            )
             .unwrap();
         tracker.handle_reply_message(request2).unwrap();
         tracker.handle_reply_message(request1).unwrap();
@@ -551,7 +582,9 @@ mod tests {
         let mut tracker = ConnectionTracker::new();
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
-        let metadata = MessageMetadata::new_multipart().apply_peer_id(peer).ensure_random_conversation_id();
+        let metadata = MessageMetadata::new_multipart()
+            .apply_peer_id(peer)
+            .ensure_random_conversation_id();
         let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
         let message_part2 =
             RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);
@@ -587,7 +620,9 @@ mod tests {
         let mut tracker = ConnectionTracker::new();
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
-        let metadata = MessageMetadata::new_multipart().apply_peer_id(peer).ensure_random_conversation_id();
+        let metadata = MessageMetadata::new_multipart()
+            .apply_peer_id(peer)
+            .ensure_random_conversation_id();
         let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
         let message_part2 =
             RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);
@@ -619,7 +654,9 @@ mod tests {
         let mut tracker = ConnectionTracker::new();
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
-        let metadata = MessageMetadata::new().apply_peer_id(peer).ensure_random_conversation_id();
+        let metadata = MessageMetadata::new()
+            .apply_peer_id(peer)
+            .ensure_random_conversation_id();
         let message = RawMessage::with_metadata(metadata.clone(), vec![]);
 
         tracker.handle_request_message(message).unwrap();
@@ -665,7 +702,9 @@ mod tests {
         let mut tracker = ConnectionTracker::new();
         let peer = PeerId::new(1);
         tracker.accept_peer(peer);
-        let metadata = MessageMetadata::new_multipart().apply_peer_id(peer).ensure_random_conversation_id();
+        let metadata = MessageMetadata::new_multipart()
+            .apply_peer_id(peer)
+            .ensure_random_conversation_id();
         let message_part1 = RawMessage::with_metadata(metadata.clone(), vec![]);
         let message_part2 =
             RawMessage::with_metadata(metadata.clone().next_multipart().unwrap(), vec![]);

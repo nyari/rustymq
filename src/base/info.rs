@@ -1,5 +1,5 @@
 //! # Information base module
-//! Contains datastructures that contain operational information in RusyMQ 
+//! Contains datastructures that contain operational information in RusyMQ
 use crate::internals::serializer;
 use crate::internals::serializer::{Deserializer, Serializable, Serializer};
 

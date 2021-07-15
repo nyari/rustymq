@@ -1,6 +1,10 @@
 use super::common::*;
 
-use crate::base::{BidirectionalSocket, InwardSocket, Message, MessageMetadata, NetworkAddress, OpFlag, OutwardSocket, QueryTypedError, ReceiveTypedError, SendTypedError, Socket, SocketError, TransportMethod, TypedMessage};
+use crate::base::{
+    BidirectionalSocket, InwardSocket, Message, MessageMetadata, NetworkAddress, OpFlag,
+    OutwardSocket, QueryTypedError, ReceiveTypedError, SendTypedError, Socket, SocketError,
+    TransportMethod, TypedMessage,
+};
 use crate::model;
 use crate::transport;
 use std::collections::HashMap;

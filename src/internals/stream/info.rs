@@ -14,7 +14,9 @@ impl From<io::Error> for SocketInternalError {
     fn from(error: io::Error) -> Self {
         match error.kind() {
             io::ErrorKind::AddrInUse => SocketInternalError::TransportMethodAlreadyInUse,
-            io::ErrorKind::AddrNotAvailable => SocketInternalError::TransportMethodTargetUnreachable,
+            io::ErrorKind::AddrNotAvailable => {
+                SocketInternalError::TransportMethodTargetUnreachable
+            }
             io::ErrorKind::AlreadyExists => SocketInternalError::TransportMethodAlreadyInUse,
             io::ErrorKind::BrokenPipe => SocketInternalError::Disconnected,
             io::ErrorKind::ConnectionAborted => SocketInternalError::Disconnected,

@@ -77,15 +77,25 @@ impl From<SocketInternalError> for SocketError {
     /// Convert [`SocketInternalError`] to [`SocketError`] . Will panic in case of error is not handleable by user
     fn from(input: SocketInternalError) -> SocketError {
         match input {
-            SocketInternalError::SocketIncorrectStateError => SocketError::SocketIncorrectStateError,
+            SocketInternalError::SocketIncorrectStateError => {
+                SocketError::SocketIncorrectStateError
+            }
             SocketInternalError::SocketUnrelatedPeer => SocketError::SocketUnrelatedPeer,
-            SocketInternalError::SocketUnrelatedConversation => SocketError::SocketUnrelatedConversation,
+            SocketInternalError::SocketUnrelatedConversation => {
+                SocketError::SocketUnrelatedConversation
+            }
             SocketInternalError::SocketUnrelatedConversationPart => {
                 SocketError::SocketUnrelatedConversationPart
-            },
-            SocketInternalError::SocketConversationIdentifierMissing => SocketError::SocketConversationIdentifierMissing,
-            SocketInternalError::TransportQueueDepthReached => SocketError::TransportQueueDepthReached,
-            SocketInternalError::TransportIntegrityFatalError => SocketError::TransportIntegrityFatalError,
+            }
+            SocketInternalError::SocketConversationIdentifierMissing => {
+                SocketError::SocketConversationIdentifierMissing
+            }
+            SocketInternalError::TransportQueueDepthReached => {
+                SocketError::TransportQueueDepthReached
+            }
+            SocketInternalError::TransportIntegrityFatalError => {
+                SocketError::TransportIntegrityFatalError
+            }
             SocketInternalError::SocketUnknownPeer => SocketError::SocketUnknownPeer,
             SocketInternalError::TransportMethodAlreadyInUse => {
                 SocketError::TransportMethodAlreadyInUse
@@ -101,11 +111,17 @@ impl From<SocketInternalError> for SocketError {
             SocketInternalError::UnsupportedOpFlag(op_flag) => {
                 SocketError::UnsupportedOpFlag(op_flag)
             }
-            SocketInternalError::TransportMissingDNSDomainName => SocketError::TransportMissingDNSDomainName,
-            SocketInternalError::TransportMethodNotSupported => SocketError::TransportMethodNotSupported,
+            SocketInternalError::TransportMissingDNSDomainName => {
+                SocketError::TransportMissingDNSDomainName
+            }
+            SocketInternalError::TransportMethodNotSupported => {
+                SocketError::TransportMethodNotSupported
+            }
             SocketInternalError::AlreadyConnected => SocketError::AlreadyConnected,
             SocketInternalError::NotSupportedOperation => SocketError::NotSupportedOperation,
-            SocketInternalError::TransoportCouldNotConnect => SocketError::TransoportCouldNotConnect,
+            SocketInternalError::TransoportCouldNotConnect => {
+                SocketError::TransoportCouldNotConnect
+            }
             err => panic!(
                 "SocketInternalError occured that cannot be converted to SocketError: {:?}",
                 err

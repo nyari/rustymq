@@ -47,17 +47,12 @@ impl<'a, T> ChangeNotifyMutexGuard<'a, T>
 where
     T: Send + Sync,
 {
-    pub fn new(
-        mutex: &'a ChangeNotifyMutex<T>,
-    ) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
+    pub fn new(mutex: &'a ChangeNotifyMutex<T>) -> Result<Self, PoisonError<MutexGuard<'a, T>>> {
         let internal_mutex_guard = mutex.lock()?;
         Ok(Self::with_mutex_ref(mutex, internal_mutex_guard))
     }
 
-    pub fn with_mutex_ref(
-        mutex: &'a ChangeNotifyMutex<T>,
-        mutex_ref: MutexGuard<'a, T>,
-    ) -> Self {
+    pub fn with_mutex_ref(mutex: &'a ChangeNotifyMutex<T>, mutex_ref: MutexGuard<'a, T>) -> Self {
         Self {
             internal_mutex_guard: Some(mutex_ref),
             mutex: mutex,
@@ -145,10 +140,7 @@ where
         self.wait_on_locked(self.value.lock()?)
     }
 
-    pub fn wait_on_locked<'a>(
-        &'a self,
-        guard: MutexGuard<'a, T>,
-    ) -> LockResult<MutexGuard<'a, T>> {
+    pub fn wait_on_locked<'a>(&'a self, guard: MutexGuard<'a, T>) -> LockResult<MutexGuard<'a, T>> {
         self.var.wait(guard)
     }
 

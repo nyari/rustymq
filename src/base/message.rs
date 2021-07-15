@@ -391,7 +391,11 @@ impl MessageMetadata {
     /// ```
     pub fn ensure_random_message_id(self) -> Self {
         Self {
-            messageid: if let Some(id) = self.messageid { Some(id) } else { Some(MessageId::new_random())},
+            messageid: if let Some(id) = self.messageid {
+                Some(id)
+            } else {
+                Some(MessageId::new_random())
+            },
             ..self
         }
     }
@@ -455,7 +459,11 @@ impl MessageMetadata {
     /// ```
     pub fn ensure_random_conversation_id(self) -> Self {
         Self {
-            conversationid: if let Some(id) = self.conversationid { Some(id) } else { Some(ConversationId::new_random())},
+            conversationid: if let Some(id) = self.conversationid {
+                Some(id)
+            } else {
+                Some(ConversationId::new_random())
+            },
             ..self
         }
     }
@@ -535,7 +543,11 @@ impl MessageMetadata {
     /// ```
     pub fn continue_conversation(self) -> Self {
         Self {
-            messageid: if let Some(_) = self.messageid {Some(MessageId::new_random())} else {None},
+            messageid: if let Some(_) = self.messageid {
+                Some(MessageId::new_random())
+            } else {
+                None
+            },
             part: Part::single(),
             ..self
         }

@@ -189,7 +189,9 @@ where
                     .lock()
                     .unwrap()
                     .check_peer_connected(
-                        message.peer_id().ok_or((None, SocketError::SocketUnknownPeer))?,
+                        message
+                            .peer_id()
+                            .ok_or((None, SocketError::SocketUnknownPeer))?,
                     )
                     .map_err(|(peerid, err)| (peerid, SocketError::from(err)))?;
                 Ok(message)

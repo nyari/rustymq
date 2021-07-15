@@ -5,7 +5,10 @@ use super::common::*;
 use openssl;
 use openssl::ssl::{SslAcceptor, SslConnector, SslMethod, SslVerifyMode};
 
-use crate::base::{Message, TypedMessage, BidirectionalSocket, InwardSocket, OpFlag, OutwardSocket, Socket, NetworkAddress, TransportMethod};
+use crate::base::{
+    BidirectionalSocket, InwardSocket, Message, NetworkAddress, OpFlag, OutwardSocket, Socket,
+    TransportMethod, TypedMessage,
+};
 use std::sync::Arc;
 
 fn get_private_key() -> openssl::pkey::PKey<openssl::pkey::Private> {

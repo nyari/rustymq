@@ -1,6 +1,5 @@
 /// # Timing related helpers
 /// Timing functionality used internally by RustyMQ
-
 use std::time::Duration;
 
 /// # DurationBackoff interface

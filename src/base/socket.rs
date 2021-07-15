@@ -72,40 +72,40 @@ impl SocketError {
     /// True when the issue is caused by missuse of the socket or underlieing transport
     pub fn is_user_error(&self) -> bool {
         match self {
-            SocketError::SocketIncorrectStateError |
-            SocketError::SocketUnrelatedPeer |
-            SocketError::SocketUnrelatedConversation | 
-            SocketError::SocketUnrelatedConversationPart |
-            SocketError::SocketConversationIdentifierMissing |
-            SocketError::SocketUnknownPeer | 
-            SocketError::TransportMethodAlreadyInUse |
-            SocketError::UnsupportedOpFlag(_) |
-            SocketError::TransportMissingDNSDomainName | 
-            SocketError::TransportMethodNotSupported | 
-            SocketError::AlreadyConnected | 
-            SocketError::NotSupportedOperation => true,
-            _ => false
+            SocketError::SocketIncorrectStateError
+            | SocketError::SocketUnrelatedPeer
+            | SocketError::SocketUnrelatedConversation
+            | SocketError::SocketUnrelatedConversationPart
+            | SocketError::SocketConversationIdentifierMissing
+            | SocketError::SocketUnknownPeer
+            | SocketError::TransportMethodAlreadyInUse
+            | SocketError::UnsupportedOpFlag(_)
+            | SocketError::TransportMissingDNSDomainName
+            | SocketError::TransportMethodNotSupported
+            | SocketError::AlreadyConnected
+            | SocketError::NotSupportedOperation => true,
+            _ => false,
         }
     }
     /// True when the issue might only be temporary, and a retry might solve the issue
     pub fn is_transient(&self) -> bool {
         match self {
-            SocketError::TransportQueueDepthReached |
-            SocketError::TransportMethodTargetUnreachable |
-            SocketError::TransportHandshakeFailed |
-            SocketError::Timeout | 
-            SocketError::TransoportCouldNotConnect => true,
-            _ => false
+            SocketError::TransportQueueDepthReached
+            | SocketError::TransportMethodTargetUnreachable
+            | SocketError::TransportHandshakeFailed
+            | SocketError::Timeout
+            | SocketError::TransoportCouldNotConnect => true,
+            _ => false,
         }
     }
 
     /// True when the connection to the given peer is broken
     pub fn is_connection_breaking(&self) -> bool {
         match self {
-            SocketError::Disconnected |
-            SocketError::ConnectionRefused | 
-            SocketError::IncompatiblePeer => true,
-            _ => false
+            SocketError::Disconnected
+            | SocketError::ConnectionRefused
+            | SocketError::IncompatiblePeer => true,
+            _ => false,
         }
     }
 }
