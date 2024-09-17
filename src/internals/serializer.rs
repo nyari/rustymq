@@ -263,6 +263,65 @@ impl<'a> Deserializer for FlatDeserializer<'a> {
     }
 }
 
+pub struct BareFlatSerializer {
+    buffer: Buffer,
+}
+
+impl BareFlatSerializer {
+    pub fn new() -> Self {
+        Self { buffer: Vec::new() }
+    }
+}
+
+impl Serializer for BareFlatSerializer {
+    #[inline]
+    fn append<'a>(&mut self, slice: BufferSlice<'a>) {
+        self.buffer.extend_from_slice(slice)
+    }
+
+    #[inline]
+    fn finalize(self) -> Buffer {
+        self.buffer
+    }
+}
+
+pub struct BareFlatDeserializer<'a> {
+    buffer: BufferSlice<'a>,
+    offset: usize,
+}
+
+impl<'a> BareFlatDeserializer<'a> {
+    pub fn new(buffer: BufferSlice<'a>) -> Self {
+        Self {
+            buffer: buffer,
+            offset: 0,
+        }
+    }
+}
+
+impl<'a> Deserializer for BareFlatDeserializer<'a> {
+    #[inline]
+    fn consume<'b>(&'b mut self, amount: usize) -> Result<BufferSlice<'b>, Error> {
+        if amount + self.offset <= self.buffer.len() {
+            let offset = self.offset;
+            self.offset += amount;
+            Ok(&self.buffer[offset..self.offset])
+        } else {
+            Err(Error::EndOfBuffer)
+        }
+    }
+
+    #[inline]
+    fn deserialize<T: Serializable>(&mut self) -> Result<T, Error> {
+        T::deserialize(self)
+    }
+
+    #[inline]
+    fn byte_order_correction(&self) -> bool {
+        false
+    }
+}
+
 #[inline]
 fn sized_to_byte_slice<'a, T: Sized>(value: &'a T) -> BufferSlice<'a> {
     unsafe { std::slice::from_raw_parts(std::mem::transmute(&*value), std::mem::size_of::<T>()) }

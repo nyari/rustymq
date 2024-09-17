@@ -2,6 +2,9 @@
 //! Module containing interface and type definitions for transport methods that can be implemented in RustyMQ
 pub mod network;
 
+#[cfg(all(target_family = "unix", feature = "systemv-support"))]
+use std::path::Path;
+
 pub use self::network::NetworkAddress;
 
 use crate::base::config::TransportConfiguration;
@@ -17,6 +20,8 @@ use std::collections::HashSet;
 pub enum TransportMethod {
     /// Connect through network
     Network(NetworkAddress),
+    #[cfg(all(target_family = "unix", feature = "systemv-support"))]
+    SystemV(Box<Path>, isize),
     /// Allow implementation of custom transport methods to be used by custom [`Transport`] implementation
     Custom(Box<dyn any::Any>),
 }
